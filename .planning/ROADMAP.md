@@ -47,7 +47,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 - [x] 01-01-PLAN.md — Project scaffold + test harness + first migration with partial unique index + structlog redaction
 - [x] 01-02-PLAN.md — RateLimitGate (Postgres FOR UPDATE) + MonobankImporter port and httpx adapter
 - [x] 01-03-PLAN.md — Repos + ImportService + FastAPI routes (health, accounts, transactions, import) + idempotency / log-redaction integration tests
-- [ ] 01-04-PLAN.md — compose.yml + Dockerfile + README + manual phase-gate verification (real Mono, real docker logs)
+- [x] 01-04-PLAN.md — compose.yml + Dockerfile + README + manual phase-gate verification (real Mono, real docker logs)
 **UI hint:** no
 **Notes / Risks:**
   - **Pitfall 1 (floats for money):** schema must use `BIGINT` minor units + ISO-4217 alpha currency column from day one. No `Float`/`Real`/`Numeric(_,2)` columns for transactional amounts. `Decimal` only at edges.
