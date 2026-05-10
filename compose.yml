@@ -1,0 +1,43 @@
+# compose.yml — finance-bro single-host deploy (Phase 1: walking skeleton).
+#
+# Two services — `app` (FastAPI + uvicorn, single worker) and `db` (Postgres 17).
+# `app` binds to 127.0.0.1:8000 only — LAN/Tailscale is the trust boundary (DEP-02).
+# `db` has no host port mapping — only the `app` service in the compose network can
+# reach it. Postgres data lives in a bind mount under `${DATA_DIR}/postgres` so it
+# survives `docker compose down` and can be `tar`-backed up. `down -v` is forbidden
+# (see README — bind mounts ignore `-v`, but the README treats `-v` as muscle-memory
+# poison anyway).
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: finance_bro
+      POSTGRES_USER: finance_bro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    volumes:
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance_bro -d finance_bro"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build: .
+    user: "1000:1000"
+    environment:
+      MONO_TOKEN: ${MONO_TOKEN:?set in .env}
+      DATABASE_URL: postgresql+psycopg://finance_bro:${POSTGRES_PASSWORD}@db:5432/finance_bro
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
