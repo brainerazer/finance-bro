@@ -28,6 +28,13 @@ class CanonicalTransaction:
     amount_minor: int
     currency: str
     raw: dict[str, Any]
+    # Optional fields (defaulted) populated by the importer on first INSERT only.
+    # On UPDATE (hold→cleared), the upsert clause does NOT mutate these — D-10
+    # frozen-by-omission invariant keeps Phase 4-6 manual edits intact. Plan 02-03
+    # wires Mono payloads -> these fields; Plan 02-02 only plumbs them through.
+    hold: bool = False
+    description: str | None = None
+    mcc: int | None = None
 
 
 class ImporterProtocol(Protocol):

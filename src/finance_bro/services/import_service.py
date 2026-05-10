@@ -7,8 +7,12 @@ account Mono returns (cards + jars + FOPs — D-05), then polls the lowest-id
 Subsequent calls skip discovery — accounts come from the DB.
 
 Idempotency comes from the partial unique index on `(account_id, source_tx_id)
-WHERE NOT is_deleted`; `TransactionRepo.insert_many` uses ON CONFLICT DO
-NOTHING and returns the exact inserted count (SC#3 — second POST is a no-op).
+WHERE NOT is_deleted`; from Phase 2 (Plan 02-02), `TransactionRepo.insert_many`
+uses ON CONFLICT DO UPDATE and returns `(inserted, updated_in_place)`; this
+service folds them into the Phase 1 `ImportResultOut.inserted` field
+(`inserted_total = inserted + updated`) so the route shape stays unchanged
+until Plan 02-04 reshapes it (D-16). SC#3 — second POST is still a user-visible
+no-op (one row per Mono id), even though the SQL underneath is now an UPDATE.
 """
 
 from dataclasses import dataclass
@@ -79,13 +83,20 @@ class ImportService:
             )
         ]
 
-        # Step 4: idempotent insert
+        # Step 4: idempotent upsert (Phase 2: ON CONFLICT DO UPDATE; D-10 mutates
+        # only hold/amount_minor/raw_payload — all other columns frozen by omission).
         async with self._session_factory() as session, session.begin():
-            inserted = await TransactionRepo(session).insert_many(card.id, items)
+            inserted, updated = await TransactionRepo(session).insert_many(card.id, items)
+        # Phase 1 ImportResultOut shape preserved (Plan 02-04 reshapes the route).
+        # `inserted_total` accounts for both first-insert rows and hold→cleared updates;
+        # Phase 1's "second-import is a no-op" semantics still hold for the user (one row
+        # per Mono id), but the second call now reports inserted_total=N (all updated)
+        # rather than inserted=0 (all skipped). The user-visible row count is unchanged.
+        inserted_total = inserted + updated
 
         return ImportResult(
             polled_account_id=card.source_account_id,
             statement_count=len(items),
-            inserted=inserted,
-            skipped_duplicates=len(items) - inserted,
+            inserted=inserted_total,
+            skipped_duplicates=len(items) - inserted_total,
         )
