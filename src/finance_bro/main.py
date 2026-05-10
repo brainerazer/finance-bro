@@ -61,27 +61,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     session_factory = get_session_factory()
     gate = RateLimitGate(session_factory)
     importer = MonobankImporter(settings.mono_token, gate)
-    runner = SchedulerRunner(session_factory=session_factory, importer=importer)
-    await runner.recover_in_flight()
-    state, _last_err = await runner.read_state()
-
     scheduler = AsyncIOScheduler()
-    disable_scheduler = os.environ.get("APP_DISABLE_SCHEDULER") == "1"
-    if state == "running" and not disable_scheduler:
-        scheduler.add_job(
-            runner.tick,
-            IntervalTrigger(seconds=10),
-            id="finance-bro-tick",
-            max_instances=1,  # D-03
-            coalesce=True,  # D-03
-            misfire_grace_time=30,
-        )
-        scheduler.start()
+    runner = SchedulerRunner(session_factory=session_factory, importer=importer)
 
-    app.state.scheduler = scheduler
-    app.state.runner = runner
-
+    # CR-01: any DB-touching call (recover_in_flight, read_state) MUST run
+    # inside the try/finally that owns the httpx.AsyncClient (held by
+    # MonobankImporter). If it ran above, a startup DB blip would raise
+    # before `try:` and `runner.aclose()` would never run — leaking the
+    # client. Under filterwarnings=["error"] (pyproject.toml) the resulting
+    # unclosed-client warning escalates to a hard exception that masks the
+    # original cause.
     try:
+        await runner.recover_in_flight()
+        state, _last_err = await runner.read_state()
+
+        disable_scheduler = os.environ.get("APP_DISABLE_SCHEDULER") == "1"
+        if state == "running" and not disable_scheduler:
+            scheduler.add_job(
+                runner.tick,
+                IntervalTrigger(seconds=10),
+                id="finance-bro-tick",
+                max_instances=1,  # D-03
+                coalesce=True,  # D-03
+                misfire_grace_time=30,
+            )
+            scheduler.start()
+
+        app.state.scheduler = scheduler
+        app.state.runner = runner
+
         yield
     finally:
         if scheduler.running:
