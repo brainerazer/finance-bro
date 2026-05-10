@@ -26,7 +26,14 @@ from finance_bro.scheduler.runner import SchedulerRunner
 @pytest_asyncio.fixture(autouse=True)
 async def _truncate(session_factory):
     """Reset transactions/import_runs/accounts/scheduler_state and reseed the
-    singleton — single-consumer tick() relies on a clean queue per test."""
+    singleton — single-consumer tick() relies on a clean queue per test.
+
+    Truncates BOTH before and after the test. This file's tests use explicit
+    id values in INSERT statements (id=1 = eAid, id=2 = black, etc. — the
+    round-robin verification needs id-ASC determinism). Without a post-test
+    truncate, leftover rows would conflict with the next test file's
+    `accounts_pkey`-relying inserts (e.g. `tests/test_schema_invariants.py`
+    relies on a fresh sequence starting at 1)."""
     async with session_factory() as s:
         await s.execute(
             text(
@@ -39,6 +46,17 @@ async def _truncate(session_factory):
         )
         await s.commit()
     yield
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "TRUNCATE TABLE transactions, import_runs, accounts, "
+                "scheduler_state, mono_rate_state RESTART IDENTITY CASCADE"
+            )
+        )
+        await s.execute(
+            text("INSERT INTO scheduler_state (id, state) VALUES (1, 'running')")
+        )
+        await s.commit()
 
 
 def _make_runner(session_factory) -> SchedulerRunner:

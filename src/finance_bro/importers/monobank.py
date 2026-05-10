@@ -51,20 +51,6 @@ def _retry_after_seconds(resp: httpx.Response) -> int | None:
     return int(raw) if raw.isdigit() else None
 
 
-def _raise_typed(e: httpx.HTTPStatusError) -> None:
-    """Translate raw httpx 4xx/5xx to typed scheduler errors.
-
-    Centralized so both `discover_accounts` and `fetch_statement` route through
-    the same branch. The branching matches RESEARCH.md Pattern 4 verbatim.
-    """
-    status = e.response.status_code
-    if status == 401:
-        raise MonoAuthError("Mono token rejected (401)") from e
-    if status == 429:
-        raise MonoRateLimitError(_retry_after_seconds(e.response)) from e
-    raise MonoTransientError(f"Mono {status}") from e
-
-
 class MonobankImporter:
     source_kind = "monobank"
 
@@ -86,7 +72,12 @@ class MonobankImporter:
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
-            _raise_typed(e)
+            status = e.response.status_code
+            if status == 401:
+                raise MonoAuthError("Mono token rejected (401)") from e
+            if status == 429:
+                raise MonoRateLimitError(_retry_after_seconds(e.response)) from e
+            raise MonoTransientError(f"Mono {status}") from e
         data = resp.json()
         out: list[CanonicalAccount] = []
         for acc in data.get("accounts", []):
@@ -126,7 +117,12 @@ class MonobankImporter:
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
-            _raise_typed(e)
+            status = e.response.status_code
+            if status == 401:
+                raise MonoAuthError("Mono token rejected (401)") from e
+            if status == 429:
+                raise MonoRateLimitError(_retry_after_seconds(e.response)) from e
+            raise MonoTransientError(f"Mono {status}") from e
         for item in resp.json():
             yield CanonicalTransaction(
                 source_tx_id=item["id"],

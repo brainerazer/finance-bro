@@ -19,6 +19,10 @@ from finance_bro.scheduler.runner import SchedulerRunner
 
 @pytest_asyncio.fixture(autouse=True)
 async def _truncate(session_factory):
+    """Truncate before AND after the test — see explanation in
+    `tests/test_scheduler_round_robin.py::_truncate`. Tests in this file use
+    explicit id=N inserts that would otherwise leak past the test boundary
+    and break a sibling test file relying on a fresh accounts sequence."""
     async with session_factory() as s:
         await s.execute(
             text(
@@ -31,6 +35,17 @@ async def _truncate(session_factory):
         )
         await s.commit()
     yield
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                "TRUNCATE TABLE transactions, import_runs, accounts, "
+                "scheduler_state, mono_rate_state RESTART IDENTITY CASCADE"
+            )
+        )
+        await s.execute(
+            text("INSERT INTO scheduler_state (id, state) VALUES (1, 'running')")
+        )
+        await s.commit()
 
 
 def _make_runner(session_factory) -> SchedulerRunner:

@@ -34,6 +34,13 @@ async def pg_url(pg_container: PostgresContainer) -> str:
     url = pg_container.get_connection_url().replace("psycopg2", "psycopg")
     os.environ["DATABASE_URL"] = url
     os.environ.setdefault("MONO_TOKEN", "test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    # Phase 2 (Plan 02-03): the lifespan now starts an APScheduler that fires
+    # `runner.tick()` every 10s. In test mode we want `app.state.runner` to
+    # exist (so any test that wants to call runner methods directly can), but
+    # we do NOT want the IntervalTrigger to fire during the test session.
+    # APP_DISABLE_SCHEDULER=1 makes the lifespan skip `scheduler.start()` while
+    # still building the runner + recovering in_flight + reading state.
+    os.environ["APP_DISABLE_SCHEDULER"] = "1"
     # Clear any cached settings
     from finance_bro.core import settings as s
 
