@@ -101,15 +101,19 @@ class ImportRunRepo:
         run_id: int,
         statement_count: int,
         inserted: int,
-        updated: int,
     ) -> None:
-        """Mark a run done. Persists `inserted` (matches D-08 column name) but NOT
-        `updated` — the runner logs `updated_in_place=updated` via structlog
-        (RESEARCH.md Code Examples §3) but D-17 says no extra audit columns.
-        Pass `inserted+updated` if you want "rows touched" semantics; pass
-        `inserted` only if you want a strict insertion count. The runner decides.
+        """Mark a run done. Persists `inserted` (matches D-08 column name).
+
+        D-17 explicitly forbids extra audit columns (no separate `updated`
+        column on import_runs in v1). The runner decides what `inserted`
+        means: pass `inserted+updated` for "rows touched" semantics, or
+        pass strict insertions only. The "updated_in_place" count is logged
+        via structlog at the runner instead of stored.
+
+        WR-01: this method previously accepted an `updated` parameter that
+        it silently discarded via `del updated` — misleading API surface.
+        Removed; the runner now sums explicitly at the call site.
         """
-        del updated  # Intentionally unused — see docstring.
         await self._s.execute(
             text(
                 "UPDATE import_runs "

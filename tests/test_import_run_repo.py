@@ -192,7 +192,11 @@ async def test_mark_done_records_counts_and_completed_at(session_factory):
         repo = ImportRunRepo(s)
         claimed = await repo.claim_next_pending()
         assert claimed is not None
-        await repo.mark_done(claimed.id, statement_count=7, inserted=5, updated=2)
+        # WR-01: `updated` parameter dropped — repo persists `inserted` as
+        # whatever the caller decides "rows touched" means; the runner sums
+        # inserted+updated at the call site. Per-call insert/update breakdown
+        # is logged via structlog (`updated_in_place`) rather than stored.
+        await repo.mark_done(claimed.id, statement_count=7, inserted=5)
         await s.commit()
 
     async with session_factory() as s:

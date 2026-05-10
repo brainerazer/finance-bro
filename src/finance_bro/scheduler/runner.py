@@ -300,11 +300,14 @@ class SchedulerRunner:
                 inserted, updated = await TransactionRepo(session).insert_many(
                     account.id, items
                 )
+                # WR-01 + D-17: import_runs.inserted persists "rows touched"
+                # (insert + update). Per-call breakdown of insert-vs-update
+                # is logged via structlog (`updated_in_place` below) rather
+                # than stored in a v1 audit column.
                 await ImportRunRepo(session).mark_done(
                     run.id,
                     statement_count=len(items),
-                    inserted=inserted,
-                    updated=updated,
+                    inserted=inserted + updated,
                 )
             _log.info(
                 "scheduler.tick.run.done",
