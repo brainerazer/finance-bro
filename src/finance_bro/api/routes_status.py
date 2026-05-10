@@ -38,6 +38,14 @@ _log = structlog.get_logger()
 STATUS_QUERY = text(
     """
     WITH last_live AS (
+        -- WR-05: restrict to terminal states so `last_polled_at` and
+        -- `last_status` describe the most recent COMPLETED poll. Without
+        -- this filter, a card whose only live row is pending/in_flight
+        -- (e.g. right after a force-poll, before the tick fires) showed
+        -- last_status='pending' / last_polled_at=null — making the
+        -- semantics of "last poll" inconsistent across cards. v1.5 may add
+        -- a separate `live_queued` indicator if the UI wants to surface
+        -- "next poll is enqueued".
         SELECT DISTINCT ON (account_id)
                account_id,
                completed_at,
@@ -47,6 +55,7 @@ STATUS_QUERY = text(
                statement_count
           FROM import_runs
          WHERE run_kind = 'live'
+           AND status IN ('done', 'error')
          ORDER BY account_id, completed_at DESC NULLS LAST
     ),
     backfill_pending AS (
