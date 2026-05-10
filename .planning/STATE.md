@@ -1,3 +1,18 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+current_phase: 1 — First Real Transaction
+current_plan: none yet (awaiting `/gsd-plan-phase 1`)
+status: planning
+last_updated: "2026-05-10T11:39:16.688Z"
+progress:
+  total_phases: 7
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+---
+
 # State: finance-bro
 
 **Last updated:** 2026-05-10
@@ -52,6 +67,7 @@
 ### Open Questions
 
 These are flagged in research and to be resolved during implementation, not now:
+
 - Mono `statementItem.id` global vs per-account uniqueness — resolve empirically in Phase 1/2
 - NBU weekend/holiday API response shape — validate against a real Sunday fixture in Phase 3
 - Mono historical retention horizon (12mo vs longer) — observe in Phase 2 backfill
@@ -80,6 +96,7 @@ Run `/gsd-plan-phase 1` to decompose Phase 1 (First Real Transaction) into execu
 ### Recovery
 
 If context is lost, read in this order:
+
 1. `.planning/PROJECT.md` (Core Value, constraints)
 2. `.planning/REQUIREMENTS.md` (v1 REQ-IDs and traceability)
 3. `.planning/ROADMAP.md` (phase structure and success criteria)
