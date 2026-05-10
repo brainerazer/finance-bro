@@ -1,24 +1,41 @@
 ---
 phase: 02-reliable-sync
 verified: 2026-05-10T00:00:00Z
-status: human_needed
-score: 4/4 must-haves verified
+status: gaps_found
+score: 4/4 must-haves verified (happy path); 4 BL/CR defects must be closed before phase complete
 overrides_applied: 0
 human_verification:
   - test: "Run the app on the NAS for an hour without touching it; check GET /api/import/status for advancing last_polled_at"
     expected: "New transactions appear in GET /api/transactions within ~3 minutes of posting on the Mono card"
     why_human: "Cannot exercise the real 65s RateLimitGate against the actual Mono API in automated tests; respx mocks the HTTP layer"
-  - test: "Decide whether BL-01 and BL-02 blocker edge cases are acceptable for this phase"
-    expected: "Either accept the blockers as post-phase gap-closure work, or require them fixed before proceeding"
-    why_human: "All four success criteria are met on the happy path and tests pass 80/80. The two BLOCKER findings from the code review concern edge cases (BL-01: repeated POST /api/import during active backfill; BL-02: stale in_flight interaction with round-robin). These do not break the phase goal but could cause confusing behavior in production. Human judgment required on whether to proceed or close first."
-gaps: []
+gaps:
+  - id: BL-01
+    severity: blocker
+    file: src/finance_bro/scheduler/runner.py:116
+    summary: "enqueue_live_for_all_active_cards does not check for active backfill or pending live rows; repeated POST /api/import during a 12-month first-run backfill enqueues unbounded duplicate live rows that sit behind the backfill queue"
+    fix_size: "~4 lines (add count_pending_or_in_flight_backfill + count_pending_live guard)"
+  - id: BL-02
+    severity: blocker
+    file: src/finance_bro/scheduler/runner.py:153
+    summary: "_pick_next_active_card treats stale in_flight rows' NULL completed_at as datetime.min, making the stale card win rotation and triggering a duplicate live enqueue. Compounds because recover_in_flight runs only at lifespan startup."
+    fix_size: "~4 lines (filter status='done' in the rotation query, OR run recover_in_flight per-tick)"
+  - id: CR-01
+    severity: critical
+    file: src/finance_bro/main.py:62
+    summary: "Lifespan leaks the httpx.AsyncClient if recover_in_flight or read_state raises before the try/finally is entered. Under filterwarnings=['error'] this becomes a hard failure on startup."
+    fix_size: "~2 lines (move startup DB calls inside the try block)"
+  - id: CR-02
+    severity: critical
+    file: src/finance_bro/scheduler/runner.py:93
+    summary: "enqueue_backfill(account_id=X) silently returns [] when X is invalid/non-pollable; user cannot distinguish input error from 'nothing to do'. routes_backfill.py inherits the silent path."
+    fix_size: "Small (raise ValueError + 404 translation in routes_backfill.py)"
 ---
 
 # Phase 2: Reliable Sync Verification Report
 
 **Phase Goal:** Bohdan stops clicking import. The app polls Mono on its own at the rate-limit budget, ingests holds correctly (and updates them in place when they clear), can backfill 12 months on first connect, and surfaces "last poll N min ago" plus 401/429 distinctly so silent failures are impossible.
 **Verified:** 2026-05-10
-**Status:** human_needed
+**Status:** gaps_found (4 BL/CR defects must close; user decision on 2026-05-10)
 **Re-verification:** No — initial verification
 
 ## Goal Achievement
