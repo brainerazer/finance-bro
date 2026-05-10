@@ -9,6 +9,18 @@ never contain the token, verified by tests/test_importer_no_token_in_url.py
 Numeric currency codes are mapped to ISO-4217 alpha at the importer boundary
 via numeric_to_alpha; nothing downstream sees the numeric form. amount_minor
 is always int (no float at this seam — Pitfall 1).
+
+Phase 2 (Plan 02-03): both methods translate `httpx.HTTPStatusError` into
+typed exceptions (`MonoAuthError` on 401, `MonoRateLimitError` on 429,
+`MonoTransientError` otherwise) so the SchedulerRunner branches on intent
+instead of HTTP status strings (RESEARCH.md Pattern 4 + D-15). The
+`gate.acquire(self._token)` call MUST remain the FIRST line of each method —
+PATTERNS.md Pattern S7 invariant — even though the typed-exception wrap is
+new.
+
+Plan 02-03 also populates `CanonicalAccount.mono_type` (cards only) and
+`CanonicalTransaction.hold/description/mcc` from each Mono payload so D-01
+allowlist filtering and D-10 hold-aware upsert have data to work with.
 """
 
 from collections.abc import AsyncIterator
@@ -16,11 +28,41 @@ from datetime import UTC, datetime
 
 import httpx
 
+from finance_bro.scheduler.errors import (
+    MonoAuthError,
+    MonoRateLimitError,
+    MonoTransientError,
+)
+
 from .base import CanonicalAccount, CanonicalTransaction
 from .currency_map import numeric_to_alpha
 from .rate_limit import RateLimitGate
 
 MONO_BASE = "https://api.monobank.ua"
+
+
+def _retry_after_seconds(resp: httpx.Response) -> int | None:
+    """Parse the Retry-After header as integer seconds. Mono sometimes omits it
+    (Plan 02-03 must_haves.truths line: '429 (with Retry-After if present)')."""
+    raw = resp.headers.get("Retry-After")
+    if raw is None:
+        return None
+    raw = raw.strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _raise_typed(e: httpx.HTTPStatusError) -> None:
+    """Translate raw httpx 4xx/5xx to typed scheduler errors.
+
+    Centralized so both `discover_accounts` and `fetch_statement` route through
+    the same branch. The branching matches RESEARCH.md Pattern 4 verbatim.
+    """
+    status = e.response.status_code
+    if status == 401:
+        raise MonoAuthError("Mono token rejected (401)") from e
+    if status == 429:
+        raise MonoRateLimitError(_retry_after_seconds(e.response)) from e
+    raise MonoTransientError(f"Mono {status}") from e
 
 
 class MonobankImporter:
@@ -39,19 +81,24 @@ class MonobankImporter:
         await self._client.aclose()
 
     async def discover_accounts(self) -> list[CanonicalAccount]:
-        await self._gate.acquire(self._token)
+        await self._gate.acquire(self._token)  # Pattern S7: gate FIRST.
         resp = await self._client.get("/personal/client-info")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            _raise_typed(e)
         data = resp.json()
         out: list[CanonicalAccount] = []
         for acc in data.get("accounts", []):
             kind = "mono.fop" if acc.get("type") == "fop" else "mono.card"
+            mono_type = acc.get("type") if kind == "mono.card" else None
             out.append(
                 CanonicalAccount(
                     source_account_id=acc["id"],
                     source_kind=kind,
                     currency=numeric_to_alpha(acc["currencyCode"]),
                     raw=acc,
+                    mono_type=mono_type,
                 )
             )
         for jar in data.get("jars", []):
@@ -61,6 +108,7 @@ class MonobankImporter:
                     source_kind="mono.jar",
                     currency=numeric_to_alpha(jar["currencyCode"]),
                     raw=jar,
+                    mono_type=None,
                 )
             )
         return out
@@ -71,11 +119,14 @@ class MonobankImporter:
         since: datetime,
         until: datetime,
     ) -> AsyncIterator[CanonicalTransaction]:
-        await self._gate.acquire(self._token)
+        await self._gate.acquire(self._token)  # Pattern S7: gate FIRST.
         from_ts = int(since.timestamp())
         to_ts = int(until.timestamp())
         resp = await self._client.get(f"/personal/statement/{source_account_id}/{from_ts}/{to_ts}")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            _raise_typed(e)
         for item in resp.json():
             yield CanonicalTransaction(
                 source_tx_id=item["id"],
@@ -84,4 +135,7 @@ class MonobankImporter:
                 amount_minor=int(item["amount"]),
                 currency=numeric_to_alpha(item["currencyCode"]),
                 raw=item,
+                hold=item.get("hold", False),
+                description=item.get("description"),
+                mcc=item.get("mcc"),
             )

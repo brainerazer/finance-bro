@@ -18,6 +18,10 @@ class CanonicalAccount:
     source_kind: str
     currency: str
     raw: dict[str, Any]
+    # NEW (02-03 T1): mono_type extracted from acc.get("type") for cards;
+    # None for jars/FOPs. Drives D-01 fail-closed allowlist filter
+    # (AccountRepo.list_pollable_cards) and the 02-04 status surface.
+    mono_type: str | None = None
 
 
 @dataclass(frozen=True)
