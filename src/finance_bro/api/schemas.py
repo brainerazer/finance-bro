@@ -24,6 +24,11 @@ class AccountOut(BaseModel):
     source_kind: str
     source_account_id: str
     currency: str = Field(min_length=3, max_length=3)
+    # Mono card flavor (black/platinum/white/eAid/...). Nullable for non-card
+    # source_kinds (jars, FOPs); the column is populated by 02-01's migration
+    # backfill + 02-03's CanonicalAccount.mono_type wiring. Surfaced here so
+    # 02-04's status surface can render per-card breakdowns.
+    mono_type: str | None = None
 
 
 class TransactionOut(BaseModel):
@@ -34,6 +39,9 @@ class TransactionOut(BaseModel):
     amount_minor: int
     currency: str = Field(min_length=3, max_length=3)
     time: datetime
+    # ING-05 (Plan 02-02): `hold:true` rows are pending Mono authorizations.
+    # Always populated — Transaction.hold is non-null with server_default 'false'.
+    hold: bool
     raw_payload: dict[str, Any]
 
 
