@@ -68,7 +68,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
   4. `GET /api/import/status` (or equivalent surface) shows last successful poll timestamp, last error if any, and distinguishes 401 (token revoked → scheduler stopped, banner asks for re-paste) from 429 (rate-limit hit → backed off, will retry next slot).
 **Plans:** 4 plans
 - [x] 02-01-schema-repos-PLAN.md — Alembic 0002 (mono_type, import_runs, scheduler_state) + ImportRunRepo + SchedulerStateRepo + AccountRepo.list_pollable_cards + apscheduler dep + test fixtures
-- [ ] 02-02-hold-aware-upsert-PLAN.md — TransactionRepo.insert_many switched to ON CONFLICT DO UPDATE with frozen-fields invariant (D-10) + TransactionOut.hold + AccountOut.mono_type
+- [x] 02-02-hold-aware-upsert-PLAN.md — TransactionRepo.insert_many switched to ON CONFLICT DO UPDATE with frozen-fields invariant (D-10) + TransactionOut.hold + AccountOut.mono_type
 - [ ] 02-03-scheduler-backfill-PLAN.md — scheduler package (errors, window, runner) + APScheduler lifespan + MonobankImporter typed errors + 12-month backfill cursor + 401 sticky / 429 transient
 - [ ] 02-04-status-surface-PLAN.md — GET /api/import/status (D-14) + POST /api/backfill (D-07) + POST /api/import 202 reshape (D-16) + status/force-poll/backfill tests
 **UI hint:** no
