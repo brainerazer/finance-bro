@@ -50,3 +50,66 @@ class ImportResultOut(BaseModel):
     statement_count: int
     inserted: int
     skipped_duplicates: int
+
+
+# ----- Phase 2 (D-14) — Status surface -----
+
+
+class SchedulerStatusOut(BaseModel):
+    state: str = Field(description="One of: running, auth_failed, stopped")
+    since: datetime
+    last_error: str | None = None
+
+
+class AccountStatusOut(BaseModel):
+    account_id: int
+    source_account_id: str
+    mono_type: str | None = None
+    last_polled_at: datetime | None = None
+    last_poll_inserted: int | None = None
+    # v1: always 0; DB stores inserted+updated combined in import_runs.inserted
+    # (deferred v1.5 split — D-14). TODO: add a separate `updated_in_place` column
+    # to import_runs in v1.5 to surface insert/update breakdown distinctly.
+    last_poll_updated: int = 0
+    last_poll_statement_count: int | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    backfill_remaining: int = 0
+    backfill_total: int = 0
+
+
+class BackfillStatusOut(BaseModel):
+    state: str = Field(description="One of: idle, running")
+    runs_remaining: int
+    runs_total: int
+    eta_seconds: int | None = None
+
+
+class ImportStatusOut(BaseModel):
+    scheduler: SchedulerStatusOut
+    accounts: list[AccountStatusOut]
+    backfill: BackfillStatusOut
+
+
+# ----- Phase 2 (D-16) — Force-poll enqueue -----
+
+
+class ImportEnqueueRowOut(BaseModel):
+    account_id: int
+    run_id: int
+
+
+class ImportEnqueuedOut(BaseModel):
+    enqueued: list[ImportEnqueueRowOut]
+
+
+# ----- Phase 2 (D-07) — Backfill enqueue -----
+
+
+class BackfillEnqueueIn(BaseModel):
+    account_id: int | None = None
+    months: int = Field(default=12, ge=1, le=36)
+
+
+class BackfillEnqueueOut(BaseModel):
+    run_ids: list[int]

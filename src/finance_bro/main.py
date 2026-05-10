@@ -20,10 +20,9 @@ The shutdown call uses wait=False (Pitfall 8) — wait=True blocks lifespan
 teardown and the FastAPI lifespan never gets to close the httpx client
 cleanly.
 
-The four Phase-1 routers (health, accounts, transactions, import) stay
-mounted at /api/* with no prefix nor middleware (DEP-02 — Tailscale/LAN is
-the trust boundary in v1). Plan 02-04 will mount the status surface and
-backfill trigger alongside.
+The Phase-1 routers (health, accounts, transactions, import) and the
+Phase-2 status + backfill routers all mount at /api/* with no prefix nor
+middleware (DEP-02 — Tailscale/LAN is the trust boundary in v1).
 """
 
 import os
@@ -38,6 +37,7 @@ from finance_bro.api import (
     routes_accounts,
     routes_health,
     routes_import,
+    routes_status,
     routes_transactions,
 )
 from finance_bro.core import logging as logging_cfg
@@ -93,3 +93,4 @@ app.include_router(routes_health.router)
 app.include_router(routes_accounts.router)
 app.include_router(routes_transactions.router)
 app.include_router(routes_import.router)
+app.include_router(routes_status.router)
