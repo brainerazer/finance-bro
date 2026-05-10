@@ -1,44 +1,42 @@
-"""Import endpoint — synchronous, no body, returns ImportResultOut (D-08).
+"""Force-poll endpoint — D-16 reshape.
 
-The handler logs only the structural outcome (polled_account_id,
-statement_count, inserted, skipped_duplicates). No token, no amount values,
-no Mono response body — the structlog redaction processor (configured in
-core/logging.py) masks any token-shaped substring or `amount*`/`token*` key
-at INFO+ as a defense-in-depth guard for OPS-04.
+POST /api/import enqueues a live-poll import_runs row for every active card
+(D-01 allowlist) and returns 202 Accepted. The scheduler tick (≤10s away)
+picks up the rows and routes them through the rate-limit gate (≤65s further
+if the bucket is held).
+
+Phase 1's synchronous body shape (statement_count / inserted /
+skipped_duplicates) is GONE — the manual button is now an async hint, not a
+synchronous fetch. The 409 path (no-card-account) is also gone: with zero
+allowlisted cards the route returns 202 + {enqueued: []} (steady-state truth
+is more useful than a misleading conflict).
 """
 
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, status
 
-from finance_bro.api.deps import get_import_service
-from finance_bro.api.schemas import ImportResultOut
-from finance_bro.services.import_service import ImportService, NoCardAccountFound
+from finance_bro.api.deps import get_scheduler_runner
+from finance_bro.api.schemas import ImportEnqueuedOut, ImportEnqueueRowOut
+from finance_bro.scheduler.runner import SchedulerRunner
 
 router = APIRouter()
 _log = structlog.get_logger()
 
 
-@router.post("/api/import", response_model=ImportResultOut)
+@router.post(
+    "/api/import",
+    response_model=ImportEnqueuedOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def trigger_import(
-    svc: Annotated[ImportService, Depends(get_import_service)],
-) -> ImportResultOut:
+    runner: Annotated[SchedulerRunner, Depends(get_scheduler_runner)],
+) -> ImportEnqueuedOut:
     _log.info("import.start")
-    try:
-        result = await svc.run_one_card()
-    except NoCardAccountFound as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    _log.info(
-        "import.done",
-        polled_account_id=result.polled_account_id,
-        statement_count=result.statement_count,
-        inserted=result.inserted,
-        skipped_duplicates=result.skipped_duplicates,
-    )
-    return ImportResultOut(
-        polled_account_id=result.polled_account_id,
-        statement_count=result.statement_count,
-        inserted=result.inserted,
-        skipped_duplicates=result.skipped_duplicates,
-    )
+    pairs = await runner.enqueue_live_for_all_active_cards()
+    enqueued = [
+        ImportEnqueueRowOut(account_id=aid, run_id=rid) for (aid, rid) in pairs
+    ]
+    _log.info("import.done", enqueued_count=len(enqueued))
+    return ImportEnqueuedOut(enqueued=enqueued)

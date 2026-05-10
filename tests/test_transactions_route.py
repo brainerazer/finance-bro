@@ -11,8 +11,13 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 async def _seed(client):
+    """Seed transactions via the full pipeline. Phase 2 D-16: POST /api/import
+    is now async (returns 202 + enqueued); fetch+insert happens on the next
+    scheduler tick. Drive the tick directly here (the scheduler is disabled in
+    tests via APP_DISABLE_SCHEDULER=1)."""
+    runner = client._transport.app.state.runner
     with (
-        respx.mock(base_url="https://api.monobank.ua") as mock,
+        respx.mock(base_url="https://api.monobank.ua", assert_all_called=False) as mock,
         patch(
             "finance_bro.importers.rate_limit.asyncio.sleep",
             new_callable=AsyncMock,
@@ -30,7 +35,11 @@ async def _seed(client):
                 json=json.loads((FIXTURES / "statement_two_items.json").read_text()),
             )
         )
-        await client.post("/api/import")
+        # Tick 1: cold-boot discovery populates accounts; no live row claimed
+        # yet so an enqueue happens at the end of the tick instead.
+        await runner.tick()
+        # Tick 2: claims the enqueued live row, fetches statement, inserts.
+        await runner.tick()
 
 
 @pytest.mark.asyncio
