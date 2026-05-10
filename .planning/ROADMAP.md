@@ -45,7 +45,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
   5. Inspecting `docker logs` at INFO level after a successful import shows zero hits for the Mono token, the `X-Token` header value, or any transaction `amount` value.
 **Plans:** 4 plans
 - [x] 01-01-PLAN.md — Project scaffold + test harness + first migration with partial unique index + structlog redaction
-- [ ] 01-02-PLAN.md — RateLimitGate (Postgres FOR UPDATE) + MonobankImporter port and httpx adapter
+- [x] 01-02-PLAN.md — RateLimitGate (Postgres FOR UPDATE) + MonobankImporter port and httpx adapter
 - [ ] 01-03-PLAN.md — Repos + ImportService + FastAPI routes (health, accounts, transactions, import) + idempotency / log-redaction integration tests
 - [ ] 01-04-PLAN.md — compose.yml + Dockerfile + README + manual phase-gate verification (real Mono, real docker logs)
 **UI hint:** no
