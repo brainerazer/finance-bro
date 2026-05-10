@@ -51,7 +51,27 @@ findings:
   warning: 9
   info: 4
   total: 15
-status: issues_found
+status: fixed
+fix_status:
+  BL-01: fixed
+  BL-02: fixed
+  CR-01: fixed
+  CR-02: fixed
+  WR-01: fixed
+  WR-02: fixed
+  WR-03: fixed
+  WR-04: fixed
+  WR-05: fixed
+  WR-06: fixed
+  WR-07: fixed
+  WR-08: fixed
+  WR-09: fixed
+  IN-01: deferred (info-tier, out of scope)
+  IN-02: deferred (info-tier, out of scope)
+  IN-03: deferred (info-tier, out of scope)
+  IN-04: deferred (info-tier, out of scope)
+fixed_at: 2026-05-10T00:00:00Z
+test_result_after_fix: 93/93 passing (80 baseline + 13 new regression tests)
 ---
 
 # Phase 2: Code Review Report
