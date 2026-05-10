@@ -137,9 +137,14 @@ class ImportRunRepo:
     async def recover_in_flight(self, threshold_seconds: int = 300) -> int:
         """Reset in_flight rows older than threshold back to pending.
 
-        RESEARCH.md Pattern 7. Called once on app startup (Plan 02-03 lifespan)
-        so a crash mid-tick doesn't leave the row poisoned.
+        RESEARCH.md Pattern 7. Now called per-tick by the runner (WR-03), so
+        a crash mid-tick (or a _mark_error failure) doesn't leave a row stuck
+        in_flight indefinitely. Cheap UPDATE; no-op when nothing is stale.
         """
+        # WR-09: drop redundant list(...) wrap — `result.scalars().all()`
+        # already returns a list; `len()` of it is fine. Using rowcount on
+        # async drivers is unreliable across versions, so we keep the
+        # RETURNING materialization.
         result = await self._s.execute(
             text(
                 "UPDATE import_runs "
@@ -150,7 +155,7 @@ class ImportRunRepo:
             ),
             {"s": threshold_seconds},
         )
-        return len(list(result.scalars().all()))
+        return len(result.scalars().all())
 
     async def count_pending_or_in_flight_backfill(self, account_id: int) -> int:
         """D-06: runner skips live polling for an account whose backfill is still
