@@ -2,9 +2,17 @@
 
 `get_session` yields a per-request AsyncSession bound to the process-wide
 session factory (test or prod). `get_rate_gate` / `get_importer` /
-`get_import_service` compose the importer + service over the same factory,
-sharing one persistent RateLimitGate instance per process so the 1-req/60s
-contract is honored even across concurrent /api/import calls (Pitfall 9).
+`get_import_service` compose the importer + service over the same factory.
+
+WR-02 correction: `get_rate_gate` returns a fresh `RateLimitGate` per
+invocation; the 1-req/60s contract is honored not by Python identity but
+by the DB-side `SELECT ... FOR UPDATE` in `RateLimitGate.acquire`, whose
+state lives in the `mono_rate_state` row (Pitfall 1 / Pattern 1).
+Concurrent /api/* callers race for the row lock, not for an in-memory
+counter — which is why a per-request gate instance is safe.
+
+Do NOT "optimize" by caching gate state in Python; the contract is on
+disk. The previous docstring incorrectly implied a process-wide singleton.
 """
 
 from collections.abc import AsyncIterator
