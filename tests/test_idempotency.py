@@ -36,8 +36,8 @@ async def test_second_import_is_noop(client, session_factory):
         await s.execute(
             text(
                 """
-                INSERT INTO accounts (id, source_kind, source_account_id, currency, raw_payload, mono_type)
-                VALUES (1, 'mono.card', 'card-id-1', 'UAH', '{}'::jsonb, 'black')
+                INSERT INTO accounts (source_kind, source_account_id, currency, raw_payload, mono_type)
+                VALUES ('mono.card', 'card-id-1', 'UAH', '{}'::jsonb, 'black')
                 """
             )
         )

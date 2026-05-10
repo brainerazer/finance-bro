@@ -73,24 +73,40 @@ async def session_factory(engine: AsyncEngine):
 @pytest_asyncio.fixture
 async def client(session_factory) -> AsyncIterator[AsyncClient]:
     """ASGI test client. Truncates app-owned tables (`transactions`,
-    `accounts`, `mono_rate_state`) before yielding so route tests that load
-    the same Mono fixtures (e.g. `card-id-1`) don't see leftover state from
-    a prior test in the same pytest session. Existing tests that bypass the
-    HTTP layer (and use `session_factory` directly) keep their own isolation
-    via unique source_account_id values."""
+    `import_runs`, `accounts`, `scheduler_state`, `mono_rate_state`) BOTH
+    before and after the test so that:
+
+    - Phase 1 + Phase 2 route tests start with a clean slate and a re-seeded
+      `scheduler_state` singleton (migration 0002 seeds it but TRUNCATE wipes
+      it).
+    - Tests that INSERT explicit primary-key values (e.g. id=1 for
+      round-robin determinism — see test_force_poll_endpoint,
+      test_import_status_shape, test_idempotency) don't leak past their
+      boundary into sibling files that rely on a fresh `accounts_id_seq`
+      (e.g. test_money_invariants does INSERT INTO accounts (...) WITHOUT
+      an explicit id; the sequence resetting to 1 plus a leftover id=1 row
+      = pkey collision). 02-03 SUMMARY documented the same deviation class
+      for its session_factory-using tests; this is the corollary for client
+      fixtures that contain explicit-id INSERTs.
+
+    Tests that bypass the HTTP layer and use `session_factory` directly
+    keep their own isolation (per-test autouse truncate fixtures or unique
+    source_account_id values)."""
     from sqlalchemy import text
 
     from finance_bro.main import app
 
+    truncate_sql = text(
+        "TRUNCATE TABLE transactions, import_runs, accounts, "
+        "scheduler_state, mono_rate_state RESTART IDENTITY CASCADE"
+    )
+    reseed_sql = text(
+        "INSERT INTO scheduler_state (id, state) VALUES (1, 'running')"
+    )
+
     async with session_factory() as s:
-        await s.execute(
-            text(
-                "TRUNCATE TABLE transactions, import_runs, accounts, "
-                "scheduler_state, mono_rate_state RESTART IDENTITY CASCADE"
-            )
-        )
-        # Re-seed scheduler_state singleton (migration 0002 seeds it but TRUNCATE wipes it).
-        await s.execute(text("INSERT INTO scheduler_state (id, state) VALUES (1, 'running')"))
+        await s.execute(truncate_sql)
+        await s.execute(reseed_sql)
         await s.commit()
 
     async with (
@@ -98,3 +114,8 @@ async def client(session_factory) -> AsyncIterator[AsyncClient]:
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac,
     ):
         yield ac
+
+    async with session_factory() as s:
+        await s.execute(truncate_sql)
+        await s.execute(reseed_sql)
+        await s.commit()
