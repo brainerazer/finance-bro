@@ -70,7 +70,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 - [x] 02-01-schema-repos-PLAN.md — Alembic 0002 (mono_type, import_runs, scheduler_state) + ImportRunRepo + SchedulerStateRepo + AccountRepo.list_pollable_cards + apscheduler dep + test fixtures
 - [x] 02-02-hold-aware-upsert-PLAN.md — TransactionRepo.insert_many switched to ON CONFLICT DO UPDATE with frozen-fields invariant (D-10) + TransactionOut.hold + AccountOut.mono_type
 - [x] 02-03-scheduler-backfill-PLAN.md — scheduler package (errors, window, runner) + APScheduler lifespan + MonobankImporter typed errors + 12-month backfill cursor + 401 sticky / 429 transient
-- [ ] 02-04-status-surface-PLAN.md — GET /api/import/status (D-14) + POST /api/backfill (D-07) + POST /api/import 202 reshape (D-16) + status/force-poll/backfill tests
+- [x] 02-04-status-surface-PLAN.md — GET /api/import/status (D-14) + POST /api/backfill (D-07) + POST /api/import 202 reshape (D-16) + status/force-poll/backfill tests
 **UI hint:** no
 **Notes / Risks:**
   - **Pitfall 5 (31-day backfill window):** chunk to ≤30 days, walk newest-first, treat any 4xx as error not absence. Constant-named `MONO_STATEMENT_MAX_WINDOW_SECONDS = 2_682_000`.
