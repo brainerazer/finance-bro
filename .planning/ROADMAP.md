@@ -43,7 +43,11 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
   3. Triggering import twice in quick succession does NOT create duplicate rows: the composite `(account_id, source_tx_id)` unique index makes the second call a no-op insert.
   4. Triggering two manual imports within 60 seconds does NOT cause a Mono 429: the single token-bucket gate serializes both callers to one request per 60s, persisted to disk so a container restart cannot violate the limit.
   5. Inspecting `docker logs` at INFO level after a successful import shows zero hits for the Mono token, the `X-Token` header value, or any transaction `amount` value.
-**Plans:** TBD
+**Plans:** 4 plans
+- [ ] 01-01-PLAN.md — Project scaffold + test harness + first migration with partial unique index + structlog redaction
+- [ ] 01-02-PLAN.md — RateLimitGate (Postgres FOR UPDATE) + MonobankImporter port and httpx adapter
+- [ ] 01-03-PLAN.md — Repos + ImportService + FastAPI routes (health, accounts, transactions, import) + idempotency / log-redaction integration tests
+- [ ] 01-04-PLAN.md — compose.yml + Dockerfile + README + manual phase-gate verification (real Mono, real docker logs)
 **UI hint:** no
 **Notes / Risks:**
   - **Pitfall 1 (floats for money):** schema must use `BIGINT` minor units + ISO-4217 alpha currency column from day one. No `Float`/`Real`/`Numeric(_,2)` columns for transactional amounts. `Decimal` only at edges.
@@ -166,7 +170,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. First Real Transaction | 0/? | Not started | - |
+| 1. First Real Transaction | 0/4 | Planned | - |
 | 2. Reliable Sync | 0/? | Not started | - |
 | 3. UAH Truth | 0/? | Not started | - |
 | 4. Categorized Spending | 0/? | Not started | - |
