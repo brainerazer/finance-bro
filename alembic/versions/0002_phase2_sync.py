@@ -86,8 +86,14 @@ def upgrade() -> None:
         ),
     )
     # Pitfall 5 — index for the status-page DISTINCT ON join.
+    # WR-06: name matches actual coverage (account_id, run_kind). The DISTINCT
+    # ON in routes_status.STATUS_QUERY also sorts by completed_at DESC NULLS
+    # LAST; Postgres uses this index for the WHERE/JOIN but performs a
+    # separate sort step for the order-by. Including `completed_at` would
+    # require an expression index (NULLS LAST is not column-style) which is
+    # out of scope for v1 (perf is deferred).
     op.create_index(
-        "ix_import_runs_account_kind_completed",
+        "ix_import_runs_account_kind",
         "import_runs",
         ["account_id", "run_kind"],
         postgresql_using="btree",
@@ -103,9 +109,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_import_runs_status_created", table_name="import_runs")
-    op.drop_index(
-        "ix_import_runs_account_kind_completed", table_name="import_runs"
-    )
+    op.drop_index("ix_import_runs_account_kind", table_name="import_runs")
     op.drop_table("import_runs")
     op.drop_table("scheduler_state")
     op.drop_column("accounts", "mono_type")
