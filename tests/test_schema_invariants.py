@@ -12,9 +12,7 @@ async def test_is_deleted_default_false(session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='sd'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='sd'"))
         ).scalar_one()
         await s.execute(
             text(

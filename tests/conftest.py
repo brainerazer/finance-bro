@@ -1,13 +1,25 @@
+import asyncio
 import os
 from collections.abc import AsyncIterator
 
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
+
+from alembic import command
+
+
+def run_alembic(cfg: Config, target: str, *, downgrade: bool = False) -> None:
+    """Sync helper — Alembic's `command.upgrade/downgrade` calls
+    `asyncio.run()` internally for async env.py. We must run it in a thread
+    so the test's existing event loop isn't disturbed."""
+    if downgrade:
+        command.downgrade(cfg, target)
+    else:
+        command.upgrade(cfg, target)
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -26,11 +38,12 @@ async def pg_url(pg_container: PostgresContainer) -> str:
     from finance_bro.core import settings as s
 
     s.get_settings.cache_clear()
-    # Run alembic migrations
+    # Run alembic migrations in a worker thread — Alembic's online runner uses
+    # asyncio.run() internally, which collides with the active test loop.
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", url)
     cfg.set_main_option("script_location", "alembic")
-    command.upgrade(cfg, "head")
+    await asyncio.to_thread(run_alembic, cfg, "head")
     return url
 
 
@@ -54,8 +67,8 @@ async def session_factory(engine: AsyncEngine):
 async def client(session_factory) -> AsyncIterator[AsyncClient]:
     from finance_bro.main import app
 
-    async with LifespanManager(app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
-            yield ac
+    async with (
+        LifespanManager(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac,
+    ):
+        yield ac

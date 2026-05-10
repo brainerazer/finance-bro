@@ -24,9 +24,7 @@ async def test_amount_minor_is_bigint_signed(engine, session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='m'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='m'"))
         ).scalar_one()
         await s.execute(
             text(
@@ -37,9 +35,7 @@ async def test_amount_minor_is_bigint_signed(engine, session_factory):
             {"a": acc_id},
         )
         value = (
-            await s.execute(
-                text("SELECT amount_minor FROM transactions WHERE source_tx_id='neg'")
-            )
+            await s.execute(text("SELECT amount_minor FROM transactions WHERE source_tx_id='neg'"))
         ).scalar_one()
         assert value == -9999999999 and isinstance(value, int)
 

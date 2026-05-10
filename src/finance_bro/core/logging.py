@@ -3,17 +3,18 @@ import re
 from typing import Any
 
 import structlog
+from structlog.typing import EventDict
 
 _REDACTED = "***REDACTED***"
 _TOKEN_REGEX = re.compile(r"[A-Za-z0-9_-]{30,}")
-_CONFIGURED = False
+_configured = False
 
 
 def _redact(
     _logger: Any,
     method_name: str,
-    event_dict: dict[str, Any],
-) -> dict[str, Any]:
+    event_dict: EventDict,
+) -> EventDict:
     """Mask token / X-Token / amount* keys at INFO+; replace token-shaped
     substrings in the event message. DEBUG bypasses redaction (Pattern 4)."""
     if method_name == "debug":
@@ -29,7 +30,7 @@ def _redact(
 def configure(level: str = "INFO") -> None:
     """Wire structlog with redaction processor. Idempotent — safe to call from
     both FastAPI lifespan and tests."""
-    global _CONFIGURED
+    global _configured
     # Quiet httpx access logs — never log Mono response body at INFO (Pitfall 4).
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -40,12 +41,10 @@ def configure(level: str = "INFO") -> None:
             _redact,
             structlog.processors.JSONRenderer(),
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, level.upper())
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level.upper())),
         # Route through stdlib so a process-wide handler (and tests that
         # attach a StreamHandler to the root logger) can capture output.
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=False,
     )
-    _CONFIGURED = True
+    _configured = True

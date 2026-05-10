@@ -24,8 +24,10 @@ def test_no_auth_middleware():
 async def test_docs_open():
     from finance_bro.main import app
 
-    async with LifespanManager(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-            r = await ac.get("/docs")
-            assert r.status_code == 200
-            assert "Swagger" in r.text or "swagger" in r.text
+    async with (
+        LifespanManager(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac,
+    ):
+        r = await ac.get("/docs")
+        assert r.status_code == 200
+        assert "Swagger" in r.text or "swagger" in r.text

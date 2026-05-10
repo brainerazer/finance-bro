@@ -30,11 +30,15 @@ def test_no_token_in_logs():
 def test_no_amounts_in_logs():
     buf = _capture("INFO")
     log = structlog.get_logger()
-    log.info("paid", amount_minor=8500, amount=99)
+    # Use distinctive values that cannot collide with timestamp digits.
+    log.info("paid", amount_minor=85007117, amount=99117117)
     out = buf.getvalue()
-    assert "8500" not in out
-    assert "99" not in out
-    assert "***REDACTED***" in out
+    # The actual amount values must not leak into the rendered log line.
+    assert "85007117" not in out
+    assert "99117117" not in out
+    # Both amount* keys must carry the redacted sentinel.
+    assert '"amount_minor": "***REDACTED***"' in out
+    assert '"amount": "***REDACTED***"' in out
 
 
 def test_no_x_token_header():

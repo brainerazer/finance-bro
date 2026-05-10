@@ -23,9 +23,7 @@ def init_engine() -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     return _engine, cast(async_sessionmaker[AsyncSession], _factory)
 
 
-def set_engine(
-    engine: AsyncEngine, factory: async_sessionmaker[AsyncSession]
-) -> None:
+def set_engine(engine: AsyncEngine, factory: async_sessionmaker[AsyncSession]) -> None:
     """Test-only entry point used by tests/conftest.py to wire the
     testcontainers Postgres."""
     global _engine, _factory

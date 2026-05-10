@@ -28,9 +28,7 @@ async def test_active_duplicate_rejected(session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='a1'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='a1'"))
         ).scalar_one()
         await s.execute(
             text(
@@ -64,9 +62,7 @@ async def test_soft_deleted_can_reinsert(session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='a2'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='a2'"))
         ).scalar_one()
         await s.execute(
             text(
