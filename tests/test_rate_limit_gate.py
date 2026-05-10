@@ -53,9 +53,7 @@ async def test_concurrent_serialize(session_factory):
             gate.acquire("tok-concurrent"),
             gate.acquire("tok-concurrent"),
         )
-    assert mock_sleep.await_count == 1, (
-        f"Expected exactly one sleep, got {mock_sleep.await_count}"
-    )
+    assert mock_sleep.await_count == 1, f"Expected exactly one sleep, got {mock_sleep.await_count}"
     assert mock_sleep.await_args.args[0] >= 60
 
 
