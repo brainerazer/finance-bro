@@ -1,0 +1,53 @@
+{
+  "clientId": "test-client-multi",
+  "name": "Test User",
+  "webHookUrl": "",
+  "permissions": "rsf",
+  "accounts": [
+    {
+      "id": "card-eaid-aaaaaaaaaaaaaa",
+      "sendId": "send-eaid",
+      "balance": 0,
+      "creditLimit": 0,
+      "type": "eAid",
+      "currencyCode": 980,
+      "cashbackType": "None",
+      "maskedPan": [],
+      "iban": "UA000000000000000000000000001"
+    },
+    {
+      "id": "card-black-bbbbbbbbbbbbb",
+      "sendId": "send-black",
+      "balance": 250000,
+      "creditLimit": 0,
+      "type": "black",
+      "currencyCode": 840,
+      "cashbackType": "Miles",
+      "maskedPan": ["537541******2222"],
+      "iban": "UA000000000000000000000000002"
+    },
+    {
+      "id": "card-platinum-ccccccccccc",
+      "sendId": "send-platinum",
+      "balance": 1500000,
+      "creditLimit": 0,
+      "type": "platinum",
+      "currencyCode": 980,
+      "cashbackType": "UAH",
+      "maskedPan": ["537541******3333"],
+      "iban": "UA000000000000000000000000003"
+    },
+    {
+      "id": "card-white-ddddddddddddd",
+      "sendId": "send-white",
+      "balance": 75000,
+      "creditLimit": 0,
+      "type": "white",
+      "currencyCode": 980,
+      "cashbackType": "UAH",
+      "maskedPan": ["537541******4444"],
+      "iban": "UA000000000000000000000000004"
+    }
+  ],
+  "jars": []
+}

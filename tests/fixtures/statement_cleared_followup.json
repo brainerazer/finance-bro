@@ -1,0 +1,17 @@
+[
+  {
+    "id": "HOLD-FIXTURE-ID-1",
+    "time": 1746856800,
+    "description": "Restaurant",
+    "mcc": 5812,
+    "originalMcc": 5812,
+    "hold": false,
+    "amount": -12500,
+    "operationAmount": -12500,
+    "currencyCode": 980,
+    "commissionRate": 0,
+    "cashbackAmount": 100,
+    "balance": 87500,
+    "receiptId": "rcpt-cleared-1"
+  }
+]

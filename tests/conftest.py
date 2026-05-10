@@ -77,8 +77,13 @@ async def client(session_factory) -> AsyncIterator[AsyncClient]:
 
     async with session_factory() as s:
         await s.execute(
-            text("TRUNCATE TABLE transactions, accounts, mono_rate_state RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE TABLE transactions, import_runs, accounts, "
+                "scheduler_state, mono_rate_state RESTART IDENTITY CASCADE"
+            )
         )
+        # Re-seed scheduler_state singleton (migration 0002 seeds it but TRUNCATE wipes it).
+        await s.execute(text("INSERT INTO scheduler_state (id, state) VALUES (1, 'running')"))
         await s.commit()
 
     async with (
