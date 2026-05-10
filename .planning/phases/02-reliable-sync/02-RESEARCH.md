@@ -1061,29 +1061,32 @@ def downgrade() -> None:
 
 **If this table is empty:** N/A — there are 7 assumptions, mostly about Mono behavior that will be empirically confirmed during Phase 2 execution. None block planning.
 
-## Open Questions
+## Open Questions (RESOLVED — empirical Q1-Q3 handled gracefully in code)
 
 1. **Mono 429 Retry-After header shape**
    - What we know: Phase 1 observed zero 429s. The gate's 65 s wait should make 429 nearly impossible. Mono docs (Context7-fetched) document 429 as a status code but not the response headers.
    - What's unclear: When (if ever) Phase 2's wider rotation produces a 429, will the response include `Retry-After: <seconds>`?
    - Recommendation: Pattern 4 reads the `Retry-After` header opportunistically (`int(retry) if retry and retry.isdigit() else None`). If absent, `MonoRateLimitError.retry_after_seconds = None` and the gate's 65 s wait covers the next slot. Log the header value (or absence) on every 429 so Bohdan's logs answer the question empirically. [Resolves STATE.md Open Question]
+   - **Resolution (empirical):** Handled by `MonoRateLimitError(retry_after_seconds: int | None = None)` — opportunistic header read in 02-03.
 
 2. **Mono historical retention horizon**
    - What we know: Community libraries cite 12 months. Mono docs (Context7-fetched) do not document retention.
    - What's unclear: Will backfill chunk 11 or 12 (months 11–12 ago) return `[]` (no data) or 4xx (over-the-edge)?
    - Recommendation: Treat 4xx as `status='error'` per chunk (D-08 + Pitfall 3). The status surface shows it. Bohdan's first 12-month backfill resolves the question; document the wall once observed. [Resolves STATE.md Open Question]
+   - **Resolution (empirical):** Handled by per-chunk 4xx → `import_runs.status='error'`; backfill stops gracefully at the wall.
 
 3. **Mono `statementItem.id` per-account vs global uniqueness**
    - What we know: Phase 1 polled one card and saw no collisions. Composite key `(account_id, source_tx_id)` is defensive regardless.
    - What's unclear: Does Mono ever emit the same `id` for different accounts (e.g. on jar transfers showing both legs)?
    - Recommendation: Phase 2's wider rotation across multiple cards is the natural empirical test. If a collision is observed, `(account_id, source_tx_id)` partial unique index correctly accepts both. Log structured `tx.upsert account_id=X source_tx_id=Y inserted=BOOL` so a single grep catches collisions. [Resolves STATE.md Open Question]
+   - **Resolution (empirical):** Handled by composite `(account_id, source_tx_id) WHERE NOT is_deleted` defensive contract; collision-immune either way.
 
-4. **Where exactly to keep the in-process `cached_state` for `scheduler_state`**
+4. **Where exactly to keep the in-process `cached_state` for `scheduler_state`** (RESOLVED)
    - What we know: Pattern 5 specifies "process-local cached snapshot, write-only on 401, lifespan reads at startup". This is sufficient for v1.
    - What's unclear: If a future feature (manual scheduler restart endpoint) lands, the cache invalidation story gets harder.
    - Recommendation: Use a simple `dataclass` field on `SchedulerRunner` for v1 (`self._cached_state: SchedulerState`). Don't overcomplicate. If a manual-restart endpoint ever lands, refactor to "always re-read from DB at tick entry" — a one-line change.
 
-5. **Test harness for the scheduler tick**
+5. **Test harness for the scheduler tick** (RESOLVED)
    - What we know: APScheduler-driven testing is awkward (Pitfall 9). The recommended approach is direct `await runner.tick()`.
    - What's unclear: Should integration tests bring up `AsyncIOScheduler` and let it tick, or also call `tick()` directly?
    - Recommendation: All Phase 2 tests should call `tick()` directly. If a Phase 2.5+ ever needs to validate the APScheduler IntervalTrigger config, write one smoke test using the real scheduler with a 100ms tick interval. For Phase 2: don't bother.

@@ -26,6 +26,7 @@ requirements:
   - ING-06
   - ING-08
 tags: [phase-02, schema, migration, repo, apscheduler-install]
+context_warning: "13 files modified across 3 tasks; monitor executor context window during execution"
 
 must_haves:
   truths:
@@ -300,7 +301,7 @@ Each test uses `session_factory` fixture (Archetype B from PATTERNS.md). Imports
 The bodies will be filled in Task 3 once the repos exist. Wave 0 here just creates the file scaffolding so the executor in Task 3 has named slots to fill.
   </action>
   <verify>
-    <automated>uv run python -c "import apscheduler; print(apscheduler.__version__)" | grep -q '3.11.2' &amp;&amp; ls tests/fixtures/client_info_multi_card.json tests/fixtures/statement_with_hold.json tests/fixtures/statement_cleared_followup.json tests/fixtures/statement_empty.json &amp;&amp; uv run python -c "import json; [json.load(open(f)) for f in ['tests/fixtures/client_info_multi_card.json','tests/fixtures/statement_with_hold.json','tests/fixtures/statement_cleared_followup.json','tests/fixtures/statement_empty.json']]" &amp;&amp; grep -q "import_runs" tests/conftest.py &amp;&amp; grep -q "scheduler_state" tests/conftest.py &amp;&amp; uv run pytest tests/test_health.py tests/test_no_auth.py -x</automated>
+    <automated>uv run python -c "import apscheduler; print(apscheduler.__version__)" | grep -q '3.11.2' &amp;&amp; ls tests/fixtures/client_info_multi_card.json tests/fixtures/statement_with_hold.json tests/fixtures/statement_cleared_followup.json tests/fixtures/statement_empty.json &amp;&amp; uv run python -c "import json; [json.load(open(f)) for f in ['tests/fixtures/client_info_multi_card.json','tests/fixtures/statement_with_hold.json','tests/fixtures/statement_cleared_followup.json','tests/fixtures/statement_empty.json']]" &amp;&amp; grep -q "import_runs" tests/conftest.py &amp;&amp; grep -q "scheduler_state" tests/conftest.py &amp;&amp; uv run python -m py_compile tests/test_import_run_repo.py tests/test_scheduler_state_repo.py &amp;&amp; uv run pytest tests/test_health.py tests/test_no_auth.py -x</automated>
   </verify>
   <done>apscheduler 3.11.2 is in pyproject.toml and uv.lock; all four fixtures exist and are valid JSON; client_info_multi_card.json contains exactly one card per allowlist type plus eAid; statement_with_hold/cleared share the same `id` value `"HOLD-FIXTURE-ID-1"`; conftest's TRUNCATE includes both new tables and re-seeds scheduler_state; the two new repo test files exist with the required test names (failing); all PRE-EXISTING Phase 1 tests still pass (sanity — conftest change must not break Phase 1).</done>
 </task>
@@ -525,6 +526,26 @@ async def list_pollable_cards(self) -> list[Account]:
     return list(rows)
 ```
 
+**3.5) Wire `mono_type` into `AccountRepo.upsert_many` (BLOCKER fix — bridge between 02-01 T2 schema and 02-03 T1 importer):**
+
+- Update `AccountRepo.upsert_many`'s row-building dict to include `"mono_type": item.mono_type`. This is the wiring point between `CanonicalAccount.mono_type` (set by `MonobankImporter.discover_accounts` in plan 02-03) and the new `accounts.mono_type` column (added in T2 migration). Without this, freshly discovered accounts on first boot land with `mono_type=NULL`, silently fail the allowlist `WHERE mono_type IN ('black','platinum','white')`, and never enter the poll rotation — SC#1 breaks for fresh installs.
+
+The dict construction in `upsert_many` becomes:
+```python
+rows = [
+    {
+        "source_kind": a.source_kind,
+        "source_account_id": a.source_account_id,
+        "currency": a.currency,
+        "raw_payload": a.raw,
+        "mono_type": a.mono_type,   # NEW — wired in 02-01 T3 to bridge 02-01 T2 schema + 02-03 T1 importer
+    }
+    for a in items
+]
+```
+
+Note: `CanonicalAccount.mono_type` is added in plan 02-03 Task 1; until that lands, the attribute access raises AttributeError. **Per the wave structure (02-01 → 02-03), 02-01 must complete first.** That means 02-01 Task 3 lands the `"mono_type": a.mono_type` line BEFORE `CanonicalAccount.mono_type` exists. Mitigation: in 02-01 Task 3 use `getattr(a, "mono_type", None)` so the upsert continues to work pre-02-03 (every existing call site instantiates `CanonicalAccount` without the field; `None` is the safe value, the migration backfill in T2 already populated existing rows from `raw_payload->>'type'`). 02-03 Task 1 will then add the field, and the `getattr` continues to work — but if the executor wants the cleaner `a.mono_type` form, leave a follow-up note in 02-01 SUMMARY.md to swap once 02-03 lands. **Choose the `getattr` form for 02-01.**
+
 **4) Fill the repo unit tests** scaffolded in Task 1.
 
 `tests/test_import_run_repo.py` — for each test scaffolded:
@@ -545,9 +566,9 @@ async def list_pollable_cards(self) -> list[Account]:
 **Critical fixture detail:** every test that touches `scheduler_state` must commit/rollback within `session.begin()` blocks (mirror `services/import_service.py` pattern); each test uses its own session from `session_factory`. After test, the session_factory is torn down; per-test isolation is achieved by the conftest TRUNCATE+reseed in Task 1.
   </action>
   <verify>
-    <automated>uv run pytest tests/test_import_run_repo.py tests/test_scheduler_state_repo.py -x &amp;&amp; uv run python -c "from finance_bro.db.import_run_repo import ImportRunRepo; from finance_bro.db.scheduler_state_repo import SchedulerStateRepo; from finance_bro.db.account_repo import AccountRepo; assert hasattr(AccountRepo, 'list_pollable_cards'); print('repos ok')" &amp;&amp; uv run pytest tests/test_partial_unique_index.py tests/test_idempotency.py tests/test_rate_limit_gate.py tests/test_log_redaction.py -x</automated>
+    <automated>uv run pytest tests/test_import_run_repo.py tests/test_scheduler_state_repo.py -x &amp;&amp; uv run python -c "from finance_bro.db.import_run_repo import ImportRunRepo; from finance_bro.db.scheduler_state_repo import SchedulerStateRepo; from finance_bro.db.account_repo import AccountRepo; assert hasattr(AccountRepo, 'list_pollable_cards'); print('repos ok')" &amp;&amp; (grep -E '"mono_type":\s*(a\.mono_type|getattr\(a, *"mono_type"' src/finance_bro/db/account_repo.py || (echo "FAIL: AccountRepo.upsert_many missing mono_type wiring" &amp;&amp; exit 1)) &amp;&amp; uv run pytest tests/test_partial_unique_index.py tests/test_idempotency.py tests/test_rate_limit_gate.py tests/test_log_redaction.py -x</automated>
   </verify>
-  <done>All scaffolded repo tests pass against testcontainers Postgres; `list_pollable_cards` honors the D-01 allowlist and D-02 ordering; SchedulerStateRepo cannot create a second row (CHECK enforced); Phase 1 invariants (partial unique index, idempotency, rate gate, log redaction) still pass — plan is non-regressive.</done>
+  <done>All scaffolded repo tests pass against testcontainers Postgres; `list_pollable_cards` honors the D-01 allowlist and D-02 ordering; AccountRepo.upsert_many writes mono_type from CanonicalAccount on insert (using `getattr(a, "mono_type", None)` to stay compatible with pre-02-03 callers); existing accounts retain backfilled value; SchedulerStateRepo cannot create a second row (CHECK enforced); Phase 1 invariants (partial unique index, idempotency, rate gate, log redaction) still pass — plan is non-regressive.</done>
 </task>
 
 </tasks>

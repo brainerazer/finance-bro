@@ -80,7 +80,7 @@ Bohdan stops clicking import. The app polls Mono on its own at the rate-limit bu
 
 1. `src/finance_bro/api/schemas.py` — add status + enqueue + backfill schemas:
    - `SchedulerStatusOut(state: str, since: datetime, last_error: str | None)`
-   - `AccountStatusOut(account_id: int, source_account_id: str, mono_type: str | None, last_polled_at: datetime | None, last_poll_inserted: int | None, last_poll_statement_count: int | None, last_status: str | None, last_error: str | None, backfill_remaining: int, backfill_total: int)`
+   - `AccountStatusOut(account_id: int, source_account_id: str, mono_type: str | None, last_polled_at: datetime | None, last_poll_inserted: int | None, last_poll_updated: int, last_poll_statement_count: int | None, last_status: str | None, last_error: str | None, backfill_remaining: int, backfill_total: int)`
    - `BackfillStatusOut(state: str, runs_remaining: int, runs_total: int, eta_seconds: int | None)`
    - `ImportStatusOut(scheduler: SchedulerStatusOut, accounts: list[AccountStatusOut], backfill: BackfillStatusOut)`
    - `ImportEnqueueRowOut(account_id: int, run_id: int)`
@@ -91,8 +91,8 @@ Bohdan stops clicking import. The app polls Mono on its own at the rate-limit bu
 
 2. `src/finance_bro/api/routes_status.py` (NEW) per PATTERNS.md lines 386-418.
    - `GET /api/import/status` returning `ImportStatusOut`.
-   - Uses RESEARCH.md Code Examples §4 (lines 911-952) STATUS_QUERY CTE verbatim.
-   - Includes `last_poll_updated` per RESEARCH.md D-14 even though the underlying column is `inserted` (the DB stores inserted+updated together in `import_runs.inserted`; for v1 we surface `last_poll_inserted = inserted+updated` and `last_poll_updated = 0` always — note this in code; v1.5 may add a separate `updated_in_place` column to `import_runs`). **Discretion:** keep it simple — the status surface is informational, not a correctness boundary (Pitfall 2 same call-out). Surface a single `last_poll_inserted` field; expose `last_poll_updated` as `0` constant for now to keep the D-14 schema honest, with an inline TODO comment noting the v1.5 split.
+   - Uses RESEARCH.md Code Examples §4 (lines 911-952) STATUS_QUERY CTE verbatim, **with one addition: surface `0 AS last_poll_updated` in the SELECT** so the route hands a fully D-14-shaped row to `AccountStatusOut`.
+   - Includes `last_poll_updated` per RESEARCH.md D-14 even though the underlying column is `inserted` (the DB stores inserted+updated together in `import_runs.inserted`; for v1 we surface `last_poll_inserted = inserted+updated` and `last_poll_updated = 0` always — note this in code; v1.5 may add a separate `updated_in_place` column to `import_runs`). **Discretion:** keep it simple — the status surface is informational, not a correctness boundary (Pitfall 2 same call-out). Surface `last_poll_updated` as a `0` constant column in STATUS_QUERY and a typed `int = 0` field on `AccountStatusOut`, with an inline TODO comment noting the v1.5 split.
 
 3. `src/finance_bro/api/routes_backfill.py` (NEW) per PATTERNS.md lines 422-459.
    - `POST /api/backfill` accepting `BackfillEnqueueIn` body (defaults `account_id=None, months=12`).
@@ -237,6 +237,7 @@ class AccountStatusOut(BaseModel):
     mono_type: str | None = None
     last_polled_at: datetime | None = None
     last_poll_inserted: int | None = None
+    last_poll_updated: int = 0  # v1: always 0; DB stores inserted+updated combined in import_runs.inserted (deferred v1.5 split — D-14)
     last_poll_statement_count: int | None = None
     last_status: str | None = None
     last_error: str | None = None
@@ -341,6 +342,7 @@ STATUS_QUERY = text(
            a.mono_type,
            ll.completed_at  AS last_polled_at,
            ll.inserted      AS last_poll_inserted,
+           0                AS last_poll_updated,         -- D-14: v1 always 0; v1.5 may add a separate `updated_in_place` column to import_runs
            ll.statement_count AS last_poll_statement_count,
            ll.status        AS last_status,
            ll.last_error,
@@ -382,6 +384,7 @@ async def import_status(
                 mono_type=r["mono_type"],
                 last_polled_at=r["last_polled_at"],
                 last_poll_inserted=r["last_poll_inserted"],
+                last_poll_updated=r["last_poll_updated"],
                 last_poll_statement_count=r["last_poll_statement_count"],
                 last_status=r["last_status"],
                 last_error=r["last_error"],
@@ -529,7 +532,7 @@ Remove any respx setup that mocked `/personal/statement/...` for the synchronous
 **Do NOT delete the file** — VALIDATION.md notes test_force_poll_endpoint.py is the dedicated D-16 test (Task 2 creates it). The modified test_import_route.py exists to ensure Phase 1's existing test name continues to test something useful. Both tests can coexist with overlapping coverage.
   </action>
   <verify>
-    <automated>uv run pytest tests/test_import_route.py -x &amp;&amp; uv run python -c "from finance_bro.api.schemas import ImportStatusOut, ImportEnqueuedOut, BackfillEnqueueIn, BackfillEnqueueOut; print('schemas ok')" &amp;&amp; uv run python -c "from finance_bro.api.routes_status import router as r1; print('status route ok')" &amp;&amp; grep -q "HTTP_202_ACCEPTED" src/finance_bro/api/routes_import.py &amp;&amp; ! grep -q "ImportResultOut" src/finance_bro/api/routes_import.py &amp;&amp; ! grep -q "NoCardAccountFound" src/finance_bro/api/routes_import.py &amp;&amp; grep -q "enqueue_live_for_all_active_cards" src/finance_bro/api/routes_import.py</automated>
+    <automated>uv run pytest tests/test_import_route.py -x &amp;&amp; uv run python -c "from finance_bro.api.schemas import ImportStatusOut, ImportEnqueuedOut, BackfillEnqueueIn, BackfillEnqueueOut, AccountStatusOut; assert 'last_poll_updated' in AccountStatusOut.model_fields; print('schemas ok')" &amp;&amp; uv run python -c "from finance_bro.api.routes_status import router as r1; print('status route ok')" &amp;&amp; grep -q "last_poll_updated" src/finance_bro/api/routes_status.py &amp;&amp; grep -q "last_poll_updated" src/finance_bro/api/schemas.py &amp;&amp; grep -q "HTTP_202_ACCEPTED" src/finance_bro/api/routes_import.py &amp;&amp; ! grep -q "ImportResultOut" src/finance_bro/api/routes_import.py &amp;&amp; ! grep -q "NoCardAccountFound" src/finance_bro/api/routes_import.py &amp;&amp; grep -q "enqueue_live_for_all_active_cards" src/finance_bro/api/routes_import.py</automated>
   </verify>
   <done>schemas.py has the 8 new Pydantic models; routes_status.py exists and mounts a single GET /api/import/status that joins per RESEARCH.md Code Examples §4; routes_import.py is fully reshaped (no ImportResultOut, no NoCardAccountFound, no run_one_card call) — returns 202 + ImportEnqueuedOut; tests/test_import_route.py asserts the 202+enqueued shape; full suite green so far in this plan's task scope.</done>
 </task>

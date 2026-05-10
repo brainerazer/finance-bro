@@ -26,6 +26,7 @@ requirements:
   - ING-08
 tags: [phase-02, scheduler, apscheduler, backfill, lifespan, typed-errors, round-robin]
 
+context_warning: "14 files modified across 3 tasks; expected high context usage; consider /clear between waves"
 must_haves:
   truths:
     - "APScheduler AsyncIOScheduler starts inside FastAPI lifespan after init_engine; tick fires every 10s with max_instances=1, coalesce=True (D-03/D-04)."
@@ -1171,6 +1172,8 @@ def get_scheduler_runner(request: Request) -> SchedulerRunner:
 Add `from finance_bro.scheduler.runner import SchedulerRunner` to imports (alongside the existing imports). Do NOT add `get_scheduler` for the APScheduler instance itself — anti-pattern per PATTERNS.md.
 
 **3) `tests/conftest.py`** — add `APP_DISABLE_SCHEDULER` to the env vars set during fixture setup so the lifespan does NOT start the APScheduler in test mode.
+
+- IMPORTANT: 02-01 Task 1 already modified `tests/conftest.py` (TRUNCATE list extension + `scheduler_state` reseed). Re-read `tests/conftest.py` from disk before editing in this task — do not use cached snippets from this plan, which were authored before 02-01 landed. Only ADD the `APP_DISABLE_SCHEDULER=1` env var; do not delete or replace existing fixture code.
 
 In the `pg_url` fixture (already sets `os.environ["DATABASE_URL"]`, `os.environ.setdefault("MONO_TOKEN", ...)`), add right after:
 ```python
