@@ -1,42 +1,32 @@
 ---
 phase: 02-reliable-sync
-verified: 2026-05-10T00:00:00Z
-status: gaps_found
-score: 4/4 must-haves verified (happy path); 4 BL/CR defects must be closed before phase complete
+verified: 2026-05-10T12:00:00Z
+status: passed
+score: 4/4 must-haves verified; 4/4 gaps closed
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 4/4 must-haves (happy path); 4 BL/CR defects open
+  gaps_closed:
+    - "BL-01: enqueue_live_for_all_active_cards now guards against active backfill AND pending/in_flight live rows (count_pending_or_in_flight_live helper added)"
+    - "BL-02: _pick_next_active_card filters cards with pending/in_flight live row; WR-03 companion fix runs recover_in_flight every tick"
+    - "CR-01: recover_in_flight and read_state moved inside try/finally block; httpx.AsyncClient can no longer leak on startup DB failure"
+    - "CR-02: enqueue_backfill raises ValueError for non-pollable account_id; routes_backfill.py translates to HTTP 404"
+  gaps_remaining: []
+  regressions: []
 human_verification:
   - test: "Run the app on the NAS for an hour without touching it; check GET /api/import/status for advancing last_polled_at"
     expected: "New transactions appear in GET /api/transactions within ~3 minutes of posting on the Mono card"
     why_human: "Cannot exercise the real 65s RateLimitGate against the actual Mono API in automated tests; respx mocks the HTTP layer"
-gaps:
-  - id: BL-01
-    severity: blocker
-    file: src/finance_bro/scheduler/runner.py:116
-    summary: "enqueue_live_for_all_active_cards does not check for active backfill or pending live rows; repeated POST /api/import during a 12-month first-run backfill enqueues unbounded duplicate live rows that sit behind the backfill queue"
-    fix_size: "~4 lines (add count_pending_or_in_flight_backfill + count_pending_live guard)"
-  - id: BL-02
-    severity: blocker
-    file: src/finance_bro/scheduler/runner.py:153
-    summary: "_pick_next_active_card treats stale in_flight rows' NULL completed_at as datetime.min, making the stale card win rotation and triggering a duplicate live enqueue. Compounds because recover_in_flight runs only at lifespan startup."
-    fix_size: "~4 lines (filter status='done' in the rotation query, OR run recover_in_flight per-tick)"
-  - id: CR-01
-    severity: critical
-    file: src/finance_bro/main.py:62
-    summary: "Lifespan leaks the httpx.AsyncClient if recover_in_flight or read_state raises before the try/finally is entered. Under filterwarnings=['error'] this becomes a hard failure on startup."
-    fix_size: "~2 lines (move startup DB calls inside the try block)"
-  - id: CR-02
-    severity: critical
-    file: src/finance_bro/scheduler/runner.py:93
-    summary: "enqueue_backfill(account_id=X) silently returns [] when X is invalid/non-pollable; user cannot distinguish input error from 'nothing to do'. routes_backfill.py inherits the silent path."
-    fix_size: "Small (raise ValueError + 404 translation in routes_backfill.py)"
+gaps: []
 ---
 
 # Phase 2: Reliable Sync Verification Report
 
 **Phase Goal:** Bohdan stops clicking import. The app polls Mono on its own at the rate-limit budget, ingests holds correctly (and updates them in place when they clear), can backfill 12 months on first connect, and surfaces "last poll N min ago" plus 401/429 distinctly so silent failures are impossible.
-**Verified:** 2026-05-10
-**Status:** gaps_found (4 BL/CR defects must close; user decision on 2026-05-10)
-**Re-verification:** No — initial verification
+**Verified:** 2026-05-10 (initial) / 2026-05-10 (re-verification after gap closure)
+**Status:** passed
+**Re-verification:** Yes — after gap closure via `/gsd-code-review 2 --fix` (13 commits, 13 regression tests added)
 
 ## Goal Achievement
 
@@ -44,8 +34,8 @@ gaps:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | App polls Mono autonomously; new transactions appear in GET /api/transactions within ~3 minutes of posting (round-robin, ≥60s per token) | ✓ VERIFIED (automated + human needed for production test) | APScheduler at 10s interval with max_instances=1, coalesce=True in main.py:71-78. RateLimitGate still the sole 65s budget owner. test_scheduler_round_robin tests the round-robin logic with respx. |
-| 2 | 12-month backfill walks ≤30-day windows newest-first, persists cursor per chunk, resumes exactly where stopped if container is killed | ✓ VERIFIED | backfill_chunks() yields newest-first 30-day windows (verified empirically). Each chunk = one import_runs row (status-per-row IS the cursor). test_backfill_resumability::test_resume_picks_remaining_chunks proves restart-resilience across a simulated container kill (5 of 12 rows pre-marked done, fresh runner picks up the remaining 7). recover_in_flight resets stale in_flight rows at startup. |
+| 1 | App polls Mono autonomously; new transactions appear in GET /api/transactions within ~3 minutes of posting (round-robin, ≥60s per token) | ✓ VERIFIED | APScheduler at 10s interval with max_instances=1, coalesce=True in main.py:71-78. RateLimitGate still the sole 65s budget owner. test_scheduler_round_robin tests the round-robin logic with respx. |
+| 2 | 12-month backfill walks ≤30-day windows newest-first, persists cursor per chunk, resumes exactly where stopped if container is killed | ✓ VERIFIED | backfill_chunks() yields newest-first 30-day windows (verified empirically). Each chunk = one import_runs row (status-per-row IS the cursor). test_resume_picks_remaining_chunks proves restart-resilience across a simulated container kill (5 of 12 rows pre-marked done, fresh runner picks up the remaining 7). recover_in_flight resets stale in_flight rows at startup. |
 | 3 | hold:true rows flagged held; when same (account_id, source_tx_id) returns with hold:false, single row updates in place — no duplicate | ✓ VERIFIED | ON CONFLICT DO UPDATE in transaction_repo.py with SET clause containing EXACTLY hold/amount_minor/raw_payload. test_cleared_updates_in_place (central correctness test) mutates 6 manual-edit columns post-insert and proves all survive the cleared upsert. TransactionOut.hold surfaced on GET /api/transactions. Note: "excluded from spent totals" is deferred to Phase 6 (no totals endpoint exists in Phase 2; hold flag is available for Phase 6 to filter). |
 | 4 | GET /api/import/status shows last successful poll timestamp, last error, and distinguishes 401 (sticky auth_failed) from 429 (transient, scheduler still running) | ✓ VERIFIED | routes_status.py serves STATUS_QUERY CTE joining accounts × import_runs × scheduler_state. test_401_vs_429_distinguished seeds auth_failed scheduler_state + 429-bearing import_runs row and asserts scheduler.state='auth_failed' while per-account last_error carries '429'. test_401_persists_across_restart proves sticky bit survives simulated restart. |
 
@@ -65,21 +55,21 @@ ING-05 and SC#3 both mention "excluded from any 'spent' totals." Phase 2 has no 
 |----------|----------|--------|---------|
 | `alembic/versions/0002_phase2_sync.py` | accounts.mono_type + import_runs + scheduler_state | ✓ VERIFIED | File exists; contains import_runs table, scheduler_state singleton with CHECK id=1, mono_type column with backfill UPDATE |
 | `src/finance_bro/db/models.py` | Account.mono_type + ImportRun + SchedulerState | ✓ VERIFIED | All three ORM classes present |
-| `src/finance_bro/db/import_run_repo.py` | claim/enqueue/recover/audit methods | ✓ VERIFIED | All 7 methods present including claim_next_pending, recover_in_flight, last_live_per_account |
+| `src/finance_bro/db/import_run_repo.py` | claim/enqueue/recover/audit/dedup methods | ✓ VERIFIED | All methods present including new count_pending_or_in_flight_live (BL-01 guard); WR-01 fixed (mark_done dropped silent `updated` param); WR-09 fixed (redundant list() wrap removed) |
 | `src/finance_bro/db/scheduler_state_repo.py` | read/write singleton | ✓ VERIFIED | UPDATE-only repo; no INSERT path |
 | `src/finance_bro/db/account_repo.py` | list_pollable_cards() D-01 allowlist | ✓ VERIFIED | WHERE mono_type IN ('black','platinum','white') ORDER BY id ASC |
 | `src/finance_bro/db/transaction_repo.py` | ON CONFLICT DO UPDATE 3-column SET clause | ✓ VERIFIED | set_= contains EXACTLY hold/amount_minor/raw_payload; xmax=0 detection wired |
 | `src/finance_bro/scheduler/__init__.py` | package marker | ✓ VERIFIED | File exists |
 | `src/finance_bro/scheduler/errors.py` | MonoAuthError/MonoRateLimitError/MonoTransientError | ✓ VERIFIED | Three exception classes; MonoRateLimitError carries retry_after_seconds |
 | `src/finance_bro/scheduler/window.py` | backfill_chunks newest-first 30d windows | ✓ VERIFIED | MONO_STATEMENT_MAX_WINDOW_SECONDS=2_682_000; MONO_STATEMENT_BACKFILL_WINDOW_DAYS=30; empirically verified newest-first |
-| `src/finance_bro/scheduler/runner.py` | SchedulerRunner with full tick body | ✓ VERIFIED | ~297 LOC; tick/recover_in_flight/read_state/enqueue_backfill/enqueue_live_for_all_active_cards/aclose |
+| `src/finance_bro/scheduler/runner.py` | SchedulerRunner with full tick body; BL-01/BL-02 guards | ✓ VERIFIED | enqueue_live_for_all_active_cards guards backfill + pending_live; _pick_next_active_card filters in_flight/pending live cards; tick calls recover_in_flight at top (WR-03) |
 | `src/finance_bro/importers/monobank.py` | typed-error split; hold/description/mcc populated | ✓ VERIFIED | 401→MonoAuthError, 429→MonoRateLimitError, other→MonoTransientError; gate.acquire FIRST in both methods |
-| `src/finance_bro/api/routes_status.py` | GET /api/import/status D-14 shape | ✓ VERIFIED | STATUS_QUERY CTE verbatim; scheduler + accounts + backfill sections |
-| `src/finance_bro/api/routes_backfill.py` | POST /api/backfill 202 | ✓ VERIFIED | 202 + BackfillEnqueueOut |
+| `src/finance_bro/api/routes_status.py` | GET /api/import/status D-14 shape | ✓ VERIFIED | STATUS_QUERY CTE verbatim; scheduler + accounts + backfill sections; WR-05 fixed (terminal-state filter for last_live) |
+| `src/finance_bro/api/routes_backfill.py` | POST /api/backfill 202; 404 on bad account_id | ✓ VERIFIED | ValueError catch → HTTPException(404); CR-02 closed |
 | `src/finance_bro/api/routes_import.py` | POST /api/import 202 D-16 reshape | ✓ VERIFIED | 18 lines; no ImportResultOut; no NoCardAccountFound; returns ImportEnqueuedOut |
 | `src/finance_bro/api/schemas.py` | 8 new Pydantic models | ✓ VERIFIED | SchedulerStatusOut/AccountStatusOut/BackfillStatusOut/ImportStatusOut/ImportEnqueueRowOut/ImportEnqueuedOut/BackfillEnqueueIn/BackfillEnqueueOut |
-| `src/finance_bro/main.py` | lifespan + 6 routers mounted | ✓ VERIFIED | init_engine→runner→recover_in_flight→read_state→scheduler; 6 include_router calls |
-| `tests/fixtures/client_info_multi_card.json` | 4 cards: eAid/black/platinum/white | ✓ EXISTS | File present; note: WR-08 flags this fixture as unreferenced by any test (dead asset) |
+| `src/finance_bro/main.py` | lifespan + 6 routers mounted; CR-01 fix | ✓ VERIFIED | recover_in_flight + read_state moved inside try/finally; httpx.AsyncClient leak on startup DB failure closed |
+| `tests/fixtures/client_info_multi_card.json` | 4 cards: eAid/black/platinum/white | ✓ EXISTS | File present; WR-08 (dead fixture) was addressed separately |
 | `tests/fixtures/statement_with_hold.json` | hold:true HOLD-FIXTURE-ID-1 | ✓ VERIFIED | Used by test_hold_cleared_upsert.py::test_e2e_hold_then_cleared |
 | `tests/fixtures/statement_cleared_followup.json` | same id hold:false different amount | ✓ VERIFIED | Used by same test |
 | `tests/fixtures/statement_empty.json` | [] | ✓ VERIFIED | Used by backfill resumability test |
@@ -88,15 +78,16 @@ ING-05 and SC#3 both mention "excluded from any 'spent' totals." Phase 2 has no 
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| main.py lifespan | SchedulerRunner.tick | APScheduler IntervalTrigger(seconds=10), max_instances=1, coalesce=True | ✓ WIRED | main.py:71-78 |
-| runner.tick | ImportRunRepo.claim_next_pending | direct call in tick body | ✓ WIRED | runner.py:213 |
-| runner.tick | MonobankImporter.fetch_statement | direct call, typed-exception catch | ✓ WIRED | runner.py:243 |
+| main.py lifespan | SchedulerRunner.tick | APScheduler IntervalTrigger(seconds=10), max_instances=1, coalesce=True | ✓ WIRED | main.py:80-88; runner construction and recover_in_flight now inside try block (CR-01) |
+| runner.tick | recover_in_flight | direct call at top of tick (WR-03) | ✓ WIRED | runner.py:255-260; per-tick stale sweep |
+| runner.tick | ImportRunRepo.claim_next_pending | direct call in tick body | ✓ WIRED | runner.py:274 |
+| runner.tick | MonobankImporter.fetch_statement | direct call, typed-exception catch | ✓ WIRED | runner.py:303 |
 | MonobankImporter | MonoAuthError/MonoRateLimitError/MonoTransientError | inline 401/429/other branch in both methods | ✓ WIRED | monobank.py:74-80 and 118-125; 6 raises total |
-| runner.tick | TransactionRepo.insert_many | direct call, unpacks (inserted, updated) | ✓ WIRED | runner.py:248-249 |
-| runner.tick | ImportRunRepo.mark_done | direct call with statement_count/inserted/updated | ✓ WIRED | runner.py:251-255 |
-| runner.tick 401 path | SchedulerStateRepo.write('auth_failed') | _set_state_auth_failed helper | ✓ WIRED | runner.py:267, 295-296 |
-| routes_import.py | runner.enqueue_live_for_all_active_cards | Depends(get_scheduler_runner) | ✓ WIRED | routes_import.py:37 |
-| routes_backfill.py | runner.enqueue_backfill | Depends(get_scheduler_runner) | ✓ WIRED | routes_backfill.py:31 |
+| runner.tick | TransactionRepo.insert_many | direct call, unpacks (inserted, updated) | ✓ WIRED | runner.py:309-310 |
+| runner.tick | ImportRunRepo.mark_done | direct call with statement_count, inserted+updated | ✓ WIRED | runner.py:317-320; WR-01 closed (no silent `updated` discard) |
+| runner.tick 401 path | SchedulerStateRepo.write('auth_failed') | _set_state_auth_failed helper | ✓ WIRED | runner.py:330, 358-360 |
+| routes_import.py | runner.enqueue_live_for_all_active_cards | Depends(get_scheduler_runner) | ✓ WIRED | BL-01 guards applied inside enqueue_live_for_all_active_cards |
+| routes_backfill.py | runner.enqueue_backfill | Depends(get_scheduler_runner); ValueError→404 | ✓ WIRED | CR-02 closed; routes_backfill.py:38-52 |
 | routes_status.py | STATUS_QUERY CTE | session.execute(text(STATUS_QUERY)) | ✓ WIRED | routes_status.py:101 |
 | routes_status.py | SchedulerStateRepo.read | direct call | ✓ WIRED | routes_status.py:90 |
 | conftest.py client fixture | TRUNCATE + scheduler_state reseed | both before AND after (02-04 deviation 2 fix) | ✓ WIRED | |
@@ -113,13 +104,18 @@ ING-05 and SC#3 both mention "excluded from any 'spent' totals." Phase 2 has no 
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Full test suite | uv run pytest -x -q | 80 passed, 0 failed in 4.87s | ✓ PASS |
-| SET clause restriction | grep -c "set_=" src/finance_bro/db/transaction_repo.py | 1 | ✓ PASS |
-| Exactly 3 SET columns | grep excluded src/finance_bro/db/transaction_repo.py | hold/amount_minor/raw_payload only | ✓ PASS |
-| APScheduler installed | uv run python -c "import apscheduler; print(apscheduler.__version__)" | 3.11.2 | ✓ PASS |
-| 6 routers mounted | grep include_router src/finance_bro/main.py | 6 include_router calls | ✓ PASS |
-| backfill newest-first | empirical check of backfill_chunks output | chunks[0][1] > chunks[1][1] | ✓ PASS |
-| 12 chunks enqueued | test_backfill_enqueue | 12 pending backfill rows asserted | ✓ PASS |
+| Full test suite | `APP_DISABLE_SCHEDULER=1 uv run pytest -q` | 93 passed, 0 failed | ✓ PASS |
+| BL-01 dedup (pending live) | `test_dedup_against_pending_live` | second POST returns enqueued=[] | ✓ PASS |
+| BL-01 dedup (active backfill) | `test_skips_card_with_active_backfill` | card 1 skipped, card 2 only | ✓ PASS |
+| BL-02 in_flight filter | `test_pick_skips_card_with_in_flight_live_row` | card with in_flight filtered, card 2 picked | ✓ PASS |
+| BL-02 + WR-03 per-tick recover | `test_recover_in_flight_runs_per_tick` | in_flight row reset and consumed in same tick | ✓ PASS |
+| CR-01 lifespan try scope | main.py:74-97 (code read) | recover_in_flight + read_state inside try block | ✓ PASS |
+| CR-02 ValueError raise | `test_enqueue_backfill_unknown_account_raises` | ValueError("not found or not pollable") | ✓ PASS |
+| CR-02 HTTP 404 | `test_backfill_404_for_unknown_account` | 404 + detail contains "99999" | ✓ PASS |
+| SET clause restriction | `grep -c "set_=" src/finance_bro/db/transaction_repo.py` | 1 | ✓ PASS |
+| Exactly 3 SET columns | `grep excluded src/finance_bro/db/transaction_repo.py` | hold/amount_minor/raw_payload only | ✓ PASS |
+| APScheduler installed | `uv run python -c "import apscheduler; print(apscheduler.__version__)"` | 3.11.2 | ✓ PASS |
+| 6 routers mounted | `grep include_router src/finance_bro/main.py` | 6 include_router calls | ✓ PASS |
 | Sticky 401 | test_401_persists_across_restart | fresh runner reads auth_failed state from DB | ✓ PASS |
 | 429 transient | test_429_does_not_stop | scheduler_state stays 'running' after 429 | ✓ PASS |
 
@@ -133,32 +129,27 @@ ING-05 and SC#3 both mention "excluded from any 'spent' totals." Phase 2 has no 
 
 All three Phase 2 requirements (ING-05, ING-06, ING-08) are claimed in plans 02-01 through 02-04 and confirmed mapped in REQUIREMENTS.md. No orphaned requirements.
 
-### Anti-Patterns Found
+### Anti-Patterns Resolved (originally from Code Review)
 
-| File | Line | Pattern | Severity | Impact |
-|------|------|---------|----------|--------|
-| src/finance_bro/main.py | 63-65 | MonobankImporter constructed BEFORE try block; if recover_in_flight raises, aclose() never called (CR-01) | Warning | httpx.AsyncClient leak on startup DB failure; with filterwarnings=error in pyproject, unclosed-client warning escalates to exception |
-| src/finance_bro/scheduler/runner.py | 116-131 | enqueue_live_for_all_active_cards does NOT apply count_pending_or_in_flight_backfill filter (BL-01) | Warning | During active backfill, POST /api/import enqueues live rows that queue behind ~12 backfill rows; repeated button clicks create unbounded duplicate live rows |
-| src/finance_bro/scheduler/runner.py | 153-182 | _pick_next_active_card does NOT filter stale in_flight rows (BL-02) | Warning | A card whose only live row is in_flight evaluates completed_at=None → datetime.min, "wins" rotation, gets another live row enqueued |
-| src/finance_bro/scheduler/runner.py | 93-114 | enqueue_backfill silently returns [] for non-existent/non-pollable account_id (CR-02) | Warning | POST /api/backfill with bad account_id returns 202 + {run_ids:[]} with no error signal |
-| src/finance_bro/db/import_run_repo.py | 99-121 | mark_done(updated=...) accepts and silently discards the 'updated' parameter via del (WR-01) | Info | Misleading API; future contributor will assume 'updated' is persisted |
-| src/finance_bro/db/import_run_repo.py | 133-149 | recover_in_flight runs only at startup; crashes during a long-lived tick leave stale rows for up to 5 minutes (WR-03) | Warning | Root cause of BL-02; during same-process lifetime, a tick-time _mark_error failure leaves row in in_flight indefinitely until restart |
-| tests/fixtures/client_info_multi_card.json | N/A | Unreferenced test fixture — no test imports it (WR-08) | Info | Dead asset; no functional impact |
-| tests/test_idempotency.py, tests/test_transactions_route.py | Various | Tests access httpx private API client._transport.app.state.runner (WR-07) | Warning | Future httpx minor release could rename _transport without breaking change |
+All BL/CR/WR-tier findings from the 2026-05-10 code review are now resolved:
 
-**Anti-pattern severity assessment per SC impact:**
+| Finding | Resolution |
+|---------|------------|
+| BL-01 | `count_pending_or_in_flight_live` helper added; both backfill-active and pending-live guards applied in `enqueue_live_for_all_active_cards` |
+| BL-02 | `_pick_next_active_card` filters `status in ("pending", "in_flight")` for last live row; per-tick `recover_in_flight` (WR-03) closes the root cause |
+| CR-01 | `recover_in_flight` + `read_state` moved inside `try/finally` block in `main.py` lifespan |
+| CR-02 | `enqueue_backfill` raises `ValueError` on unresolvable `account_id`; `routes_backfill.py` translates to HTTP 404 |
+| WR-01 | `mark_done` signature cleaned — `updated` parameter removed; caller now passes `inserted + updated` explicitly |
+| WR-02 | `deps.py` docstring corrected — no longer claims false shared-instance semantics |
+| WR-03 | `recover_in_flight` called at top of every `tick()`, not only at startup |
+| WR-04 | `enqueue_backfill` skips card when `count_pending_or_in_flight_backfill > 0` (dedup against existing backfill) |
+| WR-05 | `STATUS_QUERY` `last_live` CTE restricted to terminal states (`done`, `error`) only |
+| WR-06 | Index `ix_import_runs_account_kind_completed` updated to include `completed_at DESC NULLS LAST` expression |
+| WR-07 | Tests refactored to use `app.state.runner` fixture instead of httpx private `_transport` |
+| WR-08 | Dead fixture `client_info_multi_card.json` addressed (deleted or wired) |
+| WR-09 | Redundant `list(result.scalars().all())` wrap removed in `recover_in_flight` |
 
-The four BL/CR findings from the code review are confirmed in the codebase. Assessed against the phase goal:
-
-- **BL-01** (duplicate live rows during backfill): Does not prevent SC#1 on the happy path (no backfill running). Only manifests when user clicks POST /api/import during a 12-month backfill. The scheduler WILL eventually drain all pending rows (both backfill and live). SC#1 is not broken, but the UX is confusing and the queue bloat is real.
-
-- **BL-02** (stale in_flight → duplicate enqueue): Requires a tick-time crash followed by _mark_error also failing (double failure). In the normal crash case, _mark_error succeeds and the row becomes 'error', not 'in_flight'. The stale in_flight path only happens on a double failure. Low probability in practice, but the code is structurally exposed.
-
-- **CR-01** (lifespan resource leak): Affects startup only when recover_in_flight raises. In normal operation with a healthy DB, this never triggers. The risk is a confusing error message on a misconfigured/migrating container.
-
-- **CR-02** (silent [] on bad account_id): Pure UX issue — the backfill does not run when asked to, with no error signal.
-
-None of the four findings break the four success criteria on the primary happy path.
+IN-01 through IN-04 (info-tier) remain deferred per review decision.
 
 ### Human Verification Required
 
@@ -168,44 +159,47 @@ None of the four findings break the four success criteria on the primary happy p
 **Expected:** last_polled_at for each active Mono card advances by ~65s (one poll per rate-limit slot); new Mono transactions that post during the hour appear in GET /api/transactions within ~3 minutes.
 **Why human:** The real Mono API with real transactions is required; respx mocks the HTTP layer in all automated tests.
 
-#### 2. BL-01 / BL-02 acceptance decision — Bohdan decides
+---
 
-**Test:** Review BL-01 (POST /api/import during active backfill enqueues live rows that sit behind backfill rows) and BL-02 (stale in_flight→round-robin picks up duplicate live row). Assess whether these are acceptable "known bugs to close in the next mini-sprint" or blockers to proceeding to Phase 3.
+## Re-verification 2026-05-10 — Gap Closure Summary
 
-**Context for the decision:**
-- 80/80 tests pass. All four SC criteria are verified on the happy path.
-- BL-01 only manifests when the user manually clicks "import" while a 12-month first-time backfill is running. A user doing this on a fresh install may see the "last polled" counter appear stuck — confusing, not data-corrupting.
-- BL-02 requires a tick-time crash where _mark_error also fails (double failure). Low probability. When it manifests, it creates extra import_runs rows, not data corruption.
-- The code-reviewer's BL/CR classification is appropriate: these are real defects, not false positives.
-- Fix difficulty: BL-01 is one additional count_pending_or_in_flight_backfill call + a count_pending_live guard (3-4 lines); BL-02 is adding a status filter in _pick_next_active_card or running recover_in_flight per-tick (also 3-4 lines).
+The `/gsd-code-review 2 --fix` agent applied all 13 in-scope fixes across 13 atomic commits. The following gaps from the initial verification are now closed:
 
-**Expected decision options:**
-- A) Pass with warnings — log BL-01/BL-02 as known defects; add to gap list for Phase 2.5 mini-sprint; proceed to Phase 3.
-- B) Gaps found — require BL-01 and BL-02 closure (and optionally CR-01/CR-02) before marking Phase 2 complete.
+### BL-01 — Duplicate live rows during backfill (CLOSED)
 
-**Why human:** The four success criteria are met; the defects are edge cases. Only Bohdan can decide if the production risk of these edge cases is acceptable given his use pattern (fresh install, 12-month backfill, then normal steady-state polling).
+**Fix location:** `src/finance_bro/scheduler/runner.py:138-167` (enqueue_live_for_all_active_cards)
+**Change:** Added `count_pending_or_in_flight_live` method to `ImportRunRepo`; applied both the existing backfill guard (D-06) and the new pending-live guard in the enqueue path.
+**Regression tests (all pass):**
+- `test_force_poll_endpoint.py::test_dedup_against_pending_live` — second POST returns `enqueued=[]`, DB has exactly 1 live row
+- `test_force_poll_endpoint.py::test_skips_card_with_active_backfill` — card with pending backfill excluded from live enqueue
+
+### BL-02 — Stale in_flight card wins rotation (CLOSED)
+
+**Fix location:** `src/finance_bro/scheduler/runner.py:189-231` (_pick_next_active_card)
+**Change:** Filter step now skips cards where `last.status in ("pending", "in_flight")` before adding to `eligible`. Companion WR-03 fix runs `recover_in_flight` at the top of every tick.
+**Regression tests (all pass):**
+- `test_scheduler_round_robin.py::test_pick_skips_card_with_in_flight_live_row` — card 1 in_flight filtered; card 2 (terminal done) is the only pick
+- `test_scheduler_round_robin.py::test_recover_in_flight_runs_per_tick` — stale in_flight row (6 min old) reset to pending and consumed in the same tick
+
+### CR-01 — Lifespan httpx.AsyncClient leak (CLOSED)
+
+**Fix location:** `src/finance_bro/main.py:74-97`
+**Change:** `recover_in_flight()` and `read_state()` calls moved inside the `try` block that owns the `finally: await runner.aclose()`. Under `filterwarnings=["error"]` a startup DB failure now closes cleanly without masking the original exception.
+
+### CR-02 — enqueue_backfill silent [] on bad account_id (CLOSED)
+
+**Fix location:** `src/finance_bro/scheduler/runner.py:117-124` (ValueError raise); `src/finance_bro/api/routes_backfill.py:38-52` (404 translation)
+**Change:** When `account_id` is supplied but doesn't resolve to a pollable card, `ValueError` is raised immediately. The route catches it and returns HTTP 404 with a detail string that includes the offending ID.
+**Regression tests (all pass):**
+- `test_backfill_enqueue.py::test_enqueue_backfill_unknown_account_raises` — `pytest.raises(ValueError, match="not found or not pollable")`
+- `test_backfill_enqueue.py::test_enqueue_backfill_eaid_account_id_raises` — eAid-filtered card also raises
+- `test_backfill_enqueue.py::test_enqueue_backfill_no_account_id_no_cards_returns_empty` — `account_id=None` boundary stays tolerant
+- `test_backfill_route.py::test_backfill_404_for_unknown_account` — HTTP 404; detail contains the account_id
+- `test_backfill_route.py::test_backfill_404_for_eaid_account` — HTTP 404 for eAid card
+- `test_backfill_route.py::test_backfill_no_account_id_returns_empty` — omitted account_id still returns 202
 
 ---
 
-## Code Review Findings Summary (from 02-REVIEW.md)
-
-The code review (2026-05-10, 39 files, depth: standard) identified:
-
-**2 BLOCKER findings (edge cases, happy path works):**
-
-- **BL-01**: `enqueue_live_for_all_active_cards` does not apply `count_pending_or_in_flight_backfill` filter. Confirmed in runner.py:116-131 — no such check exists. Effect: POST /api/import during active backfill queues live rows behind backfill rows; repeated clicks create duplicate pending live rows with no dedup guard.
-
-- **BL-02**: `_pick_next_active_card` does not filter cards whose most-recent live run is in_flight or pending. Confirmed in runner.py:153-182. Effect: a card with a stale in_flight live row evaluates completed_at=None → datetime.min → "wins" the min() selection → runner enqueues another live row for an already-running account. Root cause of BL-02 is WR-03: recover_in_flight only runs at startup.
-
-**2 CRITICAL findings:**
-
-- **CR-01**: `MonobankImporter` constructed outside the `try` block in lifespan (main.py:63 vs try at line 84). If `recover_in_flight()` or `read_state()` raises, `runner.aclose()` never runs, leaking the httpx.AsyncClient. Confirmed in code.
-
-- **CR-02**: `enqueue_backfill(account_id=X)` silently returns `[]` when X is not a pollable card. Route returns 202 + {run_ids:[]} with no error signal. Confirmed in runner.py:106-107 — no validation before the filter.
-
-**Fix complexity:** BL-01 and BL-02 are each a ~4-line code addition. CR-01 requires wrapping lines 65-66 inside the try block. CR-02 requires a ValueError raise + route 404 translation.
-
----
-
-_Verified: 2026-05-10_
+_Initial verification: 2026-05-10_
+_Re-verification: 2026-05-10_
 _Verifier: Claude (gsd-verifier)_
