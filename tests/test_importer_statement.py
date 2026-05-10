@@ -35,6 +35,36 @@ async def test_discover_accounts_maps_kinds(stub_gate):
 
 
 @pytest.mark.asyncio
+async def test_discover_accounts_multi_card_mono_types(stub_gate):
+    """WR-08: exercise the rich 4-card client-info payload (eAid + black +
+    platinum + white) so the discovery path is verified end-to-end with a
+    realistic multi-card layout. Asserts each card's mono_type is mapped
+    from the Mono `type` field (Pitfall 7).
+    """
+    from finance_bro.importers.monobank import MonobankImporter
+
+    payload = json.loads((FIXTURES / "client_info_multi_card.json").read_text())
+    with respx.mock(base_url="https://api.monobank.ua") as mock:
+        mock.get("/personal/client-info").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        imp = MonobankImporter("test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaa", stub_gate)
+        accounts = await imp.discover_accounts()
+        await imp.aclose()
+
+    cards = [a for a in accounts if a.source_kind == "mono.card"]
+    assert len(cards) == 4
+    by_type = {c.mono_type: c for c in cards}
+    # All four flavors discovered with their Mono `type` preserved verbatim.
+    assert set(by_type) == {"eAid", "black", "platinum", "white"}
+    # Currency comes from currencyCode → ISO alpha (980→UAH, 840→USD).
+    assert by_type["black"].currency == "USD"
+    assert by_type["eAid"].currency == "UAH"
+    assert by_type["platinum"].currency == "UAH"
+    assert by_type["white"].currency == "UAH"
+
+
+@pytest.mark.asyncio
 async def test_discover_accounts_fop_kind(stub_gate):
     from finance_bro.importers.monobank import MonobankImporter
 
