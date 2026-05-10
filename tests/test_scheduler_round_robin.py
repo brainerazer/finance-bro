@@ -160,6 +160,117 @@ async def test_three_cards_visited_three_ticks(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_pick_skips_card_with_in_flight_live_row(session_factory):
+    """BL-02: a card whose most recent live run is `in_flight` (e.g. a stale
+    row left over from a tick-time crash where _mark_error itself failed)
+    must NOT be picked again — that creates a duplicate live row for the
+    already-running account.
+
+    Pre-fix behavior: completed_at=None collapses to datetime.min via the
+    `or` fallback; the in_flight card "wins" the rotation and gets a
+    duplicate enqueue.
+    Post-fix: filtered out by _pick_next_active_card; the other (terminal)
+    card is picked instead.
+    """
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                """
+                INSERT INTO accounts (id, source_kind, source_account_id, currency, raw_payload, mono_type) VALUES
+                  (1, 'mono.card', 'black-id', 'USD', '{}'::jsonb, 'black'),
+                  (2, 'mono.card', 'platinum-id', 'UAH', '{}'::jsonb, 'platinum')
+                """
+            )
+        )
+        # Card 1: a stale in_flight live row (started 2 minutes ago — under the
+        # 5-minute recover threshold so recover_in_flight wouldn't reset it).
+        await s.execute(
+            text(
+                """
+                INSERT INTO import_runs
+                  (account_id, run_kind, window_from, window_to, status, started_at)
+                VALUES (1, 'live', now()-interval '1 hour', now(), 'in_flight',
+                        now() - interval '2 minutes')
+                """
+            )
+        )
+        # Card 2: a recently completed live run.
+        await s.execute(
+            text(
+                """
+                INSERT INTO import_runs
+                  (account_id, run_kind, window_from, window_to, status, completed_at, statement_count, inserted)
+                VALUES (2, 'live', now()-interval '1 hour', now()-interval '5 minutes', 'done', now()-interval '5 minutes', 0, 0)
+                """
+            )
+        )
+        await s.commit()
+
+    runner = _make_runner(session_factory)
+    picked = await runner._pick_next_active_card()
+    assert picked is not None
+    # Card 1 is in_flight → must be filtered. Card 2 is the only eligible.
+    assert picked.id == 2
+
+
+@pytest.mark.asyncio
+async def test_recover_in_flight_runs_per_tick(session_factory):
+    """WR-03: stale in_flight rows older than 5 minutes are reset on every
+    tick (not only at lifespan startup), so a tick-time _mark_error failure
+    does not leave a row stuck in_flight indefinitely."""
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                """
+                INSERT INTO accounts (id, source_kind, source_account_id, currency, raw_payload, mono_type)
+                VALUES (1, 'mono.card', 'black-id', 'USD', '{}'::jsonb, 'black')
+                """
+            )
+        )
+        # Stale in_flight row — older than the 5-minute threshold.
+        await s.execute(
+            text(
+                """
+                INSERT INTO import_runs
+                  (account_id, run_kind, window_from, window_to, status, started_at, attempts)
+                VALUES (1, 'live', now()-interval '1 hour', now(), 'in_flight',
+                        now() - interval '6 minutes', 1)
+                """
+            )
+        )
+        await s.commit()
+
+    runner = _make_runner(session_factory)
+    # No respx mock set up — the stale row will be reset to pending at the top
+    # of the tick. Then claim_next_pending picks it up; we don't care about
+    # the fetch outcome (httpx will fail), only that the in_flight sweep ran.
+    with respx.mock(base_url="https://api.monobank.ua") as mock, patch(
+        "finance_bro.importers.rate_limit.asyncio.sleep", new_callable=AsyncMock
+    ):
+        mock.get(url__regex=r"/personal/statement/.*").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        await runner.tick()
+
+    async with session_factory() as s:
+        # The originally in_flight row was reset to pending then claimed and
+        # marked done by the same tick.
+        statuses = (
+            (
+                await s.execute(
+                    text(
+                        "SELECT status FROM import_runs "
+                        "WHERE account_id=1 AND run_kind='live'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert "in_flight" not in statuses
+
+
+@pytest.mark.asyncio
 async def test_eaid_skipped_via_tick(session_factory):
     """E2E: the tick path also never picks eAid even with the live-row claim path."""
     async with session_factory() as s:

@@ -168,6 +168,12 @@ class SchedulerRunner:
         """D-02 + Discretion bullet 5 step 4: cards by oldest last-live completed_at,
         skipping any account whose backfill is in progress (D-06). Falls back to
         id-asc among never-polled cards (last_live is None for them).
+
+        BL-02: also skip cards whose most recent live run is `pending` or
+        `in_flight` — they are already queued/running, enqueueing another live
+        row would create a duplicate. (Without this filter, an in_flight row
+        with completed_at=None collapses to datetime.min via the `or` below
+        and "wins" the rotation, triggering a duplicate enqueue every tick.)
         """
         async with self._session_factory() as session, session.begin():
             cards = await AccountRepo(session).list_pollable_cards()
@@ -175,16 +181,23 @@ class SchedulerRunner:
                 return None
             ir_repo = ImportRunRepo(session)
             last_live = await ir_repo.last_live_per_account()
-            # Filter out cards with active backfill (D-06).
+            # Filter out cards with active backfill (D-06) or with a non-terminal
+            # live row already queued/running (BL-02).
             eligible: list[Account] = []
             for c in cards:
                 if await ir_repo.count_pending_or_in_flight_backfill(c.id) > 0:
+                    continue
+                last = last_live.get(c.id)
+                if last is not None and last.status in ("pending", "in_flight"):
                     continue
                 eligible.append(c)
             if not eligible:
                 return None
             # Prefer never-polled (last_live is None) by id ASC; otherwise
-            # oldest completed_at.
+            # oldest completed_at. After the BL-02 filter above, every
+            # eligible card with a last_live entry has a terminal status
+            # (`done` or `error`), so completed_at is non-null and the `or`
+            # fallback is dead code — kept for defensive typing.
             never_polled = [c for c in eligible if c.id not in last_live]
             if never_polled:
                 # `cards` is already ORDER BY id ASC.
@@ -210,6 +223,19 @@ class SchedulerRunner:
         """
         if self._cached_state[0] != "running":
             return
+
+        # WR-03: sweep stale in_flight rows every tick (cheap UPDATE, no-op
+        # when nothing is stale). The 5-min threshold is meaningless in a
+        # long-lived process if recover_in_flight only runs at startup —
+        # a tick-time _mark_error failure (DB blip between claim_next_pending
+        # and mark_error) would leave the row in_flight indefinitely. Running
+        # it per tick is the root-cause fix that also closes BL-02 fully.
+        try:
+            await self.recover_in_flight()
+        except Exception:  # noqa: BLE001
+            # Don't let a sweep failure abort the tick; log and continue so
+            # the rest of the tick body still has a chance to do useful work.
+            _log.exception("scheduler.tick.recover.failed")
 
         # Cold-boot: ensure discovery has run.
         try:
