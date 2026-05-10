@@ -23,9 +23,7 @@ async def test_discover_accounts_maps_kinds(stub_gate):
 
     payload = json.loads((FIXTURES / "client_info_minimal.json").read_text())
     with respx.mock(base_url="https://api.monobank.ua") as mock:
-        mock.get("/personal/client-info").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        mock.get("/personal/client-info").mock(return_value=httpx.Response(200, json=payload))
         imp = MonobankImporter("test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaa", stub_gate)
         accounts = await imp.discover_accounts()
         await imp.aclose()
@@ -61,9 +59,7 @@ async def test_discover_accounts_fop_kind(stub_gate):
         "jars": [],
     }
     with respx.mock(base_url="https://api.monobank.ua") as mock:
-        mock.get("/personal/client-info").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        mock.get("/personal/client-info").mock(return_value=httpx.Response(200, json=payload))
         imp = MonobankImporter("test-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaa", stub_gate)
         accounts = await imp.discover_accounts()
         await imp.aclose()
