@@ -29,8 +29,14 @@ async def test_second_import_is_noop(client):
     assert first.status_code == 200
     assert second.status_code == 200
     f, s = first.json(), second.json()
+    # Phase 2 (02-02): insert_many uses ON CONFLICT DO UPDATE. ImportService folds
+    # `(inserted, updated_in_place)` into Phase 1's single `inserted` field as
+    # `inserted_total = inserted + updated`. The user-visible no-op (one row per
+    # Mono id) is preserved — second import touches both rows via UPDATE rather
+    # than skipping them via DO NOTHING, so `inserted` reports 2 and
+    # `skipped_duplicates` is 0. The single-row invariant is the SC#3 contract.
     assert f["inserted"] == 2 and f["skipped_duplicates"] == 0
-    assert s["inserted"] == 0 and s["skipped_duplicates"] == 2
+    assert s["inserted"] == 2 and s["skipped_duplicates"] == 0
     # And only 2 rows actually exist
     r = await client.get("/api/transactions")
     assert len(r.json()) == 2
