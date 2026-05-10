@@ -46,7 +46,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 **Plans:** 4 plans
 - [x] 01-01-PLAN.md — Project scaffold + test harness + first migration with partial unique index + structlog redaction
 - [x] 01-02-PLAN.md — RateLimitGate (Postgres FOR UPDATE) + MonobankImporter port and httpx adapter
-- [ ] 01-03-PLAN.md — Repos + ImportService + FastAPI routes (health, accounts, transactions, import) + idempotency / log-redaction integration tests
+- [x] 01-03-PLAN.md — Repos + ImportService + FastAPI routes (health, accounts, transactions, import) + idempotency / log-redaction integration tests
 - [ ] 01-04-PLAN.md — compose.yml + Dockerfile + README + manual phase-gate verification (real Mono, real docker logs)
 **UI hint:** no
 **Notes / Risks:**
