@@ -103,6 +103,11 @@ class SchedulerRunner:
         ValueError so the caller can return 4xx instead of silently returning [].
         With `account_id=None` (the "all active cards" path) an empty result is
         valid — it just means there are no pollable cards yet.
+
+        WR-04: skip a card whose backfill is already pending/in-flight. Two
+        consecutive POSTs with the same account_id+months would otherwise
+        double the rate-limit budget consumption (~13 minutes of global 60s/req
+        budget wasted on duplicate chunks).
         """
         now = datetime.now(UTC)
         chunks = list(backfill_chunks(now, months=months))
@@ -117,8 +122,13 @@ class SchedulerRunner:
                         "(must be mono.card with mono_type in "
                         "black/platinum/white)"
                     )
+            ir_repo = ImportRunRepo(session)
             for acc in accounts:
-                ids = await ImportRunRepo(session).enqueue_backfill(acc.id, chunks)
+                # WR-04: dedup. A second backfill request while one is still
+                # draining is a no-op for that card.
+                if await ir_repo.count_pending_or_in_flight_backfill(acc.id) > 0:
+                    continue
+                ids = await ir_repo.enqueue_backfill(acc.id, chunks)
                 ids_out.extend(ids)
         _log.info(
             "scheduler.backfill.enqueue", account_count=len(accounts), runs=len(ids_out)

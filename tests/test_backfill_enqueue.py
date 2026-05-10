@@ -165,3 +165,36 @@ async def test_enqueue_backfill_no_account_id_no_cards_returns_empty(
     runner = _make_runner(session_factory)
     ids = await runner.enqueue_backfill(account_id=None, months=12)
     assert ids == []
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backfill_dedups_against_active(session_factory):
+    """WR-04: a second enqueue_backfill while the first is still draining is
+    a no-op for that card. Prevents wasted rate-limit budget on duplicate
+    chunks (~13 minutes per 12-month dup)."""
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                """
+                INSERT INTO accounts (id, source_kind, source_account_id, currency, raw_payload, mono_type)
+                VALUES (1, 'mono.card', 'black-id', 'USD', '{}'::jsonb, 'black')
+                """
+            )
+        )
+        await s.commit()
+    runner = _make_runner(session_factory)
+    first = await runner.enqueue_backfill(account_id=1, months=12)
+    assert len(first) == 12
+    # Second call while the first 12 are still pending → no new rows.
+    second = await runner.enqueue_backfill(account_id=1, months=12)
+    assert second == []
+    async with session_factory() as s:
+        total = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM import_runs "
+                    "WHERE account_id=1 AND run_kind='backfill'"
+                )
+            )
+        ).scalar_one()
+    assert total == 12
