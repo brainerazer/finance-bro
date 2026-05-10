@@ -1,15 +1,4 @@
 import pytest
-from asgi_lifespan import LifespanManager
-from httpx import ASGITransport, AsyncClient
-
-
-@pytest.fixture(autouse=True)
-def _env(monkeypatch):
-    monkeypatch.setenv("MONO_TOKEN", "stub-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://x:y@localhost:5432/x")
-    from finance_bro.core import settings as s
-
-    s.get_settings.cache_clear()
 
 
 def test_no_auth_middleware():
@@ -21,13 +10,12 @@ def test_no_auth_middleware():
 
 
 @pytest.mark.asyncio
-async def test_docs_open():
-    from finance_bro.main import app
-
-    async with (
-        LifespanManager(app),
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac,
-    ):
-        r = await ac.get("/docs")
-        assert r.status_code == 200
-        assert "Swagger" in r.text or "swagger" in r.text
+async def test_docs_open(client):
+    """Phase 2 (02-03): the lifespan now opens DB connections at startup
+    (`recover_in_flight` + `read_state` in `src/finance_bro/main.py`), so a
+    bogus DATABASE_URL no longer works for lifespan-only smoke tests. Use the
+    conftest `client` fixture which wires the testcontainers Postgres before
+    the lifespan fires."""
+    r = await client.get("/docs")
+    assert r.status_code == 200
+    assert "Swagger" in r.text or "swagger" in r.text
