@@ -1,0 +1,32 @@
+[
+  {
+    "id": "tx-1",
+    "time": 1746864000,
+    "description": "Coffee",
+    "mcc": 5814,
+    "originalMcc": 5814,
+    "hold": false,
+    "amount": -8500,
+    "operationAmount": -8500,
+    "currencyCode": 980,
+    "commissionRate": 0,
+    "cashbackAmount": 0,
+    "balance": 91500,
+    "receiptId": null
+  },
+  {
+    "id": "tx-2",
+    "time": 1746860400,
+    "description": "Salary",
+    "mcc": 6011,
+    "originalMcc": 6011,
+    "hold": false,
+    "amount": 5000000,
+    "operationAmount": 5000000,
+    "currencyCode": 980,
+    "commissionRate": 0,
+    "cashbackAmount": 0,
+    "balance": 5000000,
+    "receiptId": null
+  }
+]
