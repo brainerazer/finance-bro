@@ -118,51 +118,60 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Empty initially. Populated by the roadmap agent — each requirement maps to exactly one phase.
+Each v1 requirement maps to exactly one roadmap phase. See ROADMAP.md for phase definitions.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ING-01 | TBD | Pending |
-| ING-02 | TBD | Pending |
-| ING-03 | TBD | Pending |
-| ING-04 | TBD | Pending |
-| ING-05 | TBD | Pending |
-| ING-06 | TBD | Pending |
-| ING-07 | TBD | Pending |
-| ING-08 | TBD | Pending |
-| FX-01 | TBD | Pending |
-| FX-02 | TBD | Pending |
-| FX-03 | TBD | Pending |
-| FX-04 | TBD | Pending |
-| CAT-01 | TBD | Pending |
-| CAT-02 | TBD | Pending |
-| CAT-03 | TBD | Pending |
-| CAT-04 | TBD | Pending |
-| CAT-05 | TBD | Pending |
-| REC-01 | TBD | Pending |
-| REC-02 | TBD | Pending |
-| REC-03 | TBD | Pending |
-| MAN-01 | TBD | Pending |
-| MAN-02 | TBD | Pending |
-| MAN-03 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| OPS-01 | TBD | Pending |
-| OPS-02 | TBD | Pending |
-| OPS-03 | TBD | Pending |
-| OPS-04 | TBD | Pending |
-| OPS-05 | TBD | Pending |
-| DEP-01 | TBD | Pending |
-| DEP-02 | TBD | Pending |
+| ING-01 | Phase 1 | Pending |
+| ING-02 | Phase 1 | Pending |
+| ING-03 | Phase 1 | Pending |
+| ING-04 | Phase 1 | Pending |
+| ING-05 | Phase 2 | Pending |
+| ING-06 | Phase 2 | Pending |
+| ING-07 | Phase 1 | Pending |
+| ING-08 | Phase 2 | Pending |
+| FX-01 | Phase 1 | Pending |
+| FX-02 | Phase 3 | Pending |
+| FX-03 | Phase 3 | Pending |
+| FX-04 | Phase 3 | Pending |
+| CAT-01 | Phase 4 | Pending |
+| CAT-02 | Phase 4 | Pending |
+| CAT-03 | Phase 4 | Pending |
+| CAT-04 | Phase 4 | Pending |
+| CAT-05 | Phase 4 | Pending |
+| REC-01 | Phase 5 | Pending |
+| REC-02 | Phase 5 | Pending |
+| REC-03 | Phase 5 | Pending |
+| MAN-01 | Phase 6 | Pending |
+| MAN-02 | Phase 6 | Pending |
+| MAN-03 | Phase 6 | Pending |
+| UI-01 | Phase 6 | Pending |
+| UI-02 | Phase 6 | Pending |
+| UI-03 | Phase 6 | Pending |
+| UI-04 | Phase 6 | Pending |
+| UI-05 | Phase 6 | Pending |
+| OPS-01 | Phase 1 | Pending |
+| OPS-02 | Phase 7 | Pending |
+| OPS-03 | Phase 7 | Pending |
+| OPS-04 | Phase 1 | Pending |
+| OPS-05 | Phase 7 | Pending |
+| DEP-01 | Phase 1 | Pending |
+| DEP-02 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 35 total
-- Mapped to phases: 0 (will be filled by the roadmapper)
-- Unmapped: 35 ⚠️ (expected at this stage)
+- Mapped to phases: 35
+- Unmapped: 0
+
+**Per-phase counts:**
+- Phase 1 (First Real Transaction): 10 (ING-01, ING-02, ING-03, ING-04, ING-07, FX-01, OPS-01, OPS-04, DEP-01, DEP-02)
+- Phase 2 (Reliable Sync): 3 (ING-05, ING-06, ING-08)
+- Phase 3 (UAH Truth): 3 (FX-02, FX-03, FX-04)
+- Phase 4 (Categorized Spending): 5 (CAT-01, CAT-02, CAT-03, CAT-04, CAT-05)
+- Phase 5 (Honest Totals): 3 (REC-01, REC-02, REC-03)
+- Phase 6 (This Month UI): 8 (MAN-01, MAN-02, MAN-03, UI-01, UI-02, UI-03, UI-04, UI-05)
+- Phase 7 (Ship Ready): 3 (OPS-02, OPS-03, OPS-05)
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-10 after initial definition*
+*Last updated: 2026-05-10 after roadmap creation (traceability mapped)*
