@@ -13,7 +13,7 @@ and is bounded 1..36 by Pydantic.
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from finance_bro.api.deps import get_scheduler_runner
 from finance_bro.api.schemas import BackfillEnqueueIn, BackfillEnqueueOut
@@ -35,8 +35,20 @@ async def trigger_backfill(
     _log.info(
         "backfill.enqueue.start", account_id=body.account_id, months=body.months
     )
-    run_ids = await runner.enqueue_backfill(
-        account_id=body.account_id, months=body.months
-    )
+    try:
+        run_ids = await runner.enqueue_backfill(
+            account_id=body.account_id, months=body.months
+        )
+    except ValueError as e:
+        # CR-02: explicit account_id that doesn't resolve to a pollable card
+        # surfaces as 404 rather than a silent 202 + {run_ids: []} (which is
+        # indistinguishable from "everything is filtered out for legitimate
+        # reasons" — bad UX, no operator signal).
+        _log.warning(
+            "backfill.enqueue.not_found",
+            account_id=body.account_id,
+            reason=str(e),
+        )
+        raise HTTPException(status_code=404, detail=str(e)) from e
     _log.info("backfill.enqueue.done", run_count=len(run_ids))
     return BackfillEnqueueOut(run_ids=run_ids)

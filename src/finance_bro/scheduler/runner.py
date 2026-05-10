@@ -97,6 +97,12 @@ class SchedulerRunner:
     ) -> list[int]:
         """Enqueue `months` backfill chunks per active card (or just the requested
         account). Returns the list of inserted import_run ids.
+
+        CR-02: when `account_id` is supplied but does not resolve to a pollable
+        card (unknown id, or non-card source_kind, or eAid-filtered), raise
+        ValueError so the caller can return 4xx instead of silently returning [].
+        With `account_id=None` (the "all active cards" path) an empty result is
+        valid — it just means there are no pollable cards yet.
         """
         now = datetime.now(UTC)
         chunks = list(backfill_chunks(now, months=months))
@@ -105,6 +111,12 @@ class SchedulerRunner:
             accounts = await AccountRepo(session).list_pollable_cards()
             if account_id is not None:
                 accounts = [a for a in accounts if a.id == account_id]
+                if not accounts:
+                    raise ValueError(
+                        f"account_id={account_id} not found or not pollable "
+                        "(must be mono.card with mono_type in "
+                        "black/platinum/white)"
+                    )
             for acc in accounts:
                 ids = await ImportRunRepo(session).enqueue_backfill(acc.id, chunks)
                 ids_out.extend(ids)

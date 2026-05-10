@@ -123,3 +123,45 @@ async def test_enqueue_backfill_skips_eaid(session_factory):
             )
         ).scalar_one()
     assert eaid_count == 0
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backfill_unknown_account_raises(session_factory):
+    """CR-02: enqueue_backfill(account_id=X) raises ValueError when X does
+    not resolve to a pollable card (unknown id). The route translates this
+    to 404 — see test_backfill_route_404_for_unknown_account."""
+    runner = _make_runner(session_factory)
+    with pytest.raises(ValueError, match="not found or not pollable"):
+        await runner.enqueue_backfill(account_id=99999, months=12)
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backfill_eaid_account_id_raises(session_factory):
+    """CR-02: pinning to an eAid-filtered card surfaces as ValueError, not
+    a silent []. Operator gets a signal that the request was rejected.
+    """
+    async with session_factory() as s:
+        await s.execute(
+            text(
+                """
+                INSERT INTO accounts (id, source_kind, source_account_id, currency, raw_payload, mono_type)
+                VALUES (1, 'mono.card', 'eaid-id', 'UAH', '{}'::jsonb, 'eAid')
+                """
+            )
+        )
+        await s.commit()
+    runner = _make_runner(session_factory)
+    with pytest.raises(ValueError):
+        await runner.enqueue_backfill(account_id=1, months=12)
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backfill_no_account_id_no_cards_returns_empty(
+    session_factory,
+):
+    """CR-02 boundary: account_id=None with zero pollable cards still returns
+    [] (not an error). The "all active cards" path must remain tolerant of
+    a fresh install where discovery hasn't run yet."""
+    runner = _make_runner(session_factory)
+    ids = await runner.enqueue_backfill(account_id=None, months=12)
+    assert ids == []
