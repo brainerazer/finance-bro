@@ -117,6 +117,11 @@ class SchedulerRunner:
         """D-16: enqueue a live-poll import_run for each active card. Used by
         the reshaped POST /api/import (Plan 02-04). window = now-1h..now.
         Returns list of (account_id, import_run_id) tuples.
+
+        BL-01 guards: skip a card when (a) its backfill is still draining (D-06),
+        or (b) a live row for that card is already pending/in_flight. Repeated
+        force-poll clicks during a 12-month backfill must NOT pile unbounded
+        duplicate live rows behind the backfill queue.
         """
         now = datetime.now(UTC)
         window_from = now - LIVE_POLL_LOOKBACK
@@ -125,6 +130,15 @@ class SchedulerRunner:
             accounts = await AccountRepo(session).list_pollable_cards()
             repo = ImportRunRepo(session)
             for acc in accounts:
+                # D-06: skip cards whose backfill is still draining; the live
+                # row would otherwise sit behind ~12 backfill rows in
+                # claim_next_pending (ORDER BY created_at ASC).
+                if await repo.count_pending_or_in_flight_backfill(acc.id) > 0:
+                    continue
+                # BL-01: dedup. A force-poll request for a card that already
+                # has a pending/in_flight live row is a no-op.
+                if await repo.count_pending_or_in_flight_live(acc.id) > 0:
+                    continue
                 run_id = await repo.enqueue_live(acc.id, window_from, now)
                 out.append((acc.id, run_id))
         _log.info("scheduler.live.enqueue", account_count=len(accounts), runs=len(out))

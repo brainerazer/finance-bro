@@ -164,6 +164,23 @@ class ImportRunRepo:
         ).first()
         return int(row[0]) if row else 0
 
+    async def count_pending_or_in_flight_live(self, account_id: int) -> int:
+        """BL-01: dedup guard. A force-poll request when a live row is already
+        queued (or running) is a no-op — repeated /api/import clicks must not
+        accumulate unbounded duplicate live rows for the same card."""
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT count(*) FROM import_runs "
+                    "WHERE account_id=:id "
+                    "  AND run_kind='live' "
+                    "  AND status IN ('pending','in_flight')"
+                ),
+                {"id": account_id},
+            )
+        ).first()
+        return int(row[0]) if row else 0
+
     async def last_live_per_account(self) -> dict[int, ImportRun]:
         """Most recent live run per account, keyed by account_id.
 
