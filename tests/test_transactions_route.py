@@ -10,12 +10,14 @@ from sqlalchemy import text
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-async def _seed(client):
+async def _seed(client, runner):
     """Seed transactions via the full pipeline. Phase 2 D-16: POST /api/import
     is now async (returns 202 + enqueued); fetch+insert happens on the next
     scheduler tick. Drive the tick directly here (the scheduler is disabled in
-    tests via APP_DISABLE_SCHEDULER=1)."""
-    runner = client._transport.app.state.runner
+    tests via APP_DISABLE_SCHEDULER=1).
+
+    WR-07: `runner` is supplied by the conftest fixture — replaces the prior
+    `client._transport.app.state.runner` private-API access."""
     with (
         respx.mock(base_url="https://api.monobank.ua", assert_all_called=False) as mock,
         patch(
@@ -43,8 +45,8 @@ async def _seed(client):
 
 
 @pytest.mark.asyncio
-async def test_response_shape(client):
-    await _seed(client)
+async def test_response_shape(client, runner):
+    await _seed(client, runner)
     r = await client.get("/api/transactions")
     rows = r.json()
     assert len(rows) == 2
@@ -58,8 +60,8 @@ async def test_response_shape(client):
 
 
 @pytest.mark.asyncio
-async def test_ordering_time_desc(client):
-    await _seed(client)
+async def test_ordering_time_desc(client, runner):
+    await _seed(client, runner)
     r = await client.get("/api/transactions")
     rows = r.json()
     assert rows[0]["source_tx_id"] == "tx-1"  # time=1746864000 (newer)

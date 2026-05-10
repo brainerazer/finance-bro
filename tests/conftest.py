@@ -71,6 +71,23 @@ async def session_factory(engine: AsyncEngine):
 
 
 @pytest_asyncio.fixture
+async def runner(client):  # noqa: ARG001 — depends on `client` to enforce ordering
+    """The lifespan-attached SchedulerRunner.
+
+    WR-07: tests previously reached into `client._transport.app.state.runner`
+    (httpx private API — `_transport` is underscore-prefixed and free to be
+    renamed in a minor release). Use this fixture instead so the test
+    surface is tied to our own app.state contract, not httpx internals.
+
+    Depends on `client` to ensure the lifespan has fired and `app.state.runner`
+    is populated.
+    """
+    from finance_bro.main import app
+
+    return app.state.runner
+
+
+@pytest_asyncio.fixture
 async def client(session_factory) -> AsyncIterator[AsyncClient]:
     """ASGI test client. Truncates app-owned tables (`transactions`,
     `import_runs`, `accounts`, `scheduler_state`, `mono_rate_state`) BOTH

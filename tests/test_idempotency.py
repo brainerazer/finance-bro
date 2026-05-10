@@ -26,7 +26,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.mark.asyncio
-async def test_second_import_is_noop(client, session_factory):
+async def test_second_import_is_noop(client, runner, session_factory):
     ci = json.loads((FIXTURES / "client_info_minimal.json").read_text())
     stmt = json.loads((FIXTURES / "statement_two_items.json").read_text())
 
@@ -43,7 +43,8 @@ async def test_second_import_is_noop(client, session_factory):
         )
         await s.commit()
 
-    runner = client._transport.app.state.runner
+    # WR-07: `runner` is a conftest fixture that returns app.state.runner —
+    # no longer reaching into httpx's private `_transport` attribute.
 
     with (
         respx.mock(base_url="https://api.monobank.ua", assert_all_called=False) as mock,
