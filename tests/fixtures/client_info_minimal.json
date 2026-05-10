@@ -1,0 +1,30 @@
+{
+  "clientId": "test-client-id",
+  "name": "Test User",
+  "webHookUrl": "",
+  "permissions": "rsf",
+  "accounts": [
+    {
+      "id": "card-id-1",
+      "sendId": "send-1",
+      "balance": 100000,
+      "creditLimit": 0,
+      "type": "black",
+      "currencyCode": 980,
+      "cashbackType": "UAH",
+      "maskedPan": ["537541******1234"],
+      "iban": "UA000000000000000000000000000"
+    }
+  ],
+  "jars": [
+    {
+      "id": "jar-id-1",
+      "sendId": "send-jar-1",
+      "title": "Test Jar",
+      "description": "",
+      "currencyCode": 980,
+      "balance": 50000,
+      "goal": 100000
+    }
+  ]
+}
