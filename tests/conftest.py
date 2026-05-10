@@ -65,7 +65,21 @@ async def session_factory(engine: AsyncEngine):
 
 @pytest_asyncio.fixture
 async def client(session_factory) -> AsyncIterator[AsyncClient]:
+    """ASGI test client. Truncates app-owned tables (`transactions`,
+    `accounts`, `mono_rate_state`) before yielding so route tests that load
+    the same Mono fixtures (e.g. `card-id-1`) don't see leftover state from
+    a prior test in the same pytest session. Existing tests that bypass the
+    HTTP layer (and use `session_factory` directly) keep their own isolation
+    via unique source_account_id values."""
+    from sqlalchemy import text
+
     from finance_bro.main import app
+
+    async with session_factory() as s:
+        await s.execute(
+            text("TRUNCATE TABLE transactions, accounts, mono_rate_state RESTART IDENTITY CASCADE")
+        )
+        await s.commit()
 
     async with (
         LifespanManager(app),
