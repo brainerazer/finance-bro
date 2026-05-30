@@ -1,7 +1,7 @@
 """FX-03 property tests — fx_rollup.rollup banker's rounding + no double
 conversion (Pitfall 1 + Pitfall 2 / D-14).
 
-RED scaffold for a later 03 plan (services/fx_rollup.py not yet built).
+Live (Plan 03-03): services/fx_rollup.py now exists; these assert as PASS.
 
 Two properties:
 1. ROUND_HALF_EVEN (banker's rounding) at quantize 0.01 matches the locked
@@ -10,9 +10,8 @@ Two properties:
    account-currency rate produce IDENTICAL uah_amount_minor — the fx_source
    label is audit-only; the math never triangulates (no double conversion).
 """
-from decimal import ROUND_HALF_EVEN, Decimal
 
-import pytest
+from decimal import ROUND_HALF_EVEN, Decimal
 
 
 def _expected(amount_minor: int, rate: Decimal) -> int:
@@ -20,7 +19,6 @@ def _expected(amount_minor: int, rate: Decimal) -> int:
     return int(major.quantize(Decimal("0.01"), ROUND_HALF_EVEN) * 100)
 
 
-@pytest.mark.xfail(reason="fx_rollup.rollup lands in a later 03 plan", strict=False)
 def test_bankers_rounding_matches_locked_formula():
     from finance_bro.services import fx_rollup
 
@@ -38,7 +36,6 @@ def test_bankers_rounding_matches_locked_formula():
     assert result.uah_amount_minor == _expected(2, Decimal("1.255"))
 
 
-@pytest.mark.xfail(reason="fx_rollup.rollup lands in a later 03 plan", strict=False)
 def test_mono_card_and_nbu_identical_when_same_account_amount():
     from finance_bro.services import fx_rollup
 
