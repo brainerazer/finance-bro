@@ -43,9 +43,7 @@ async def _truncate_tx(session_factory):
     `import_runs`/`scheduler_state` left alone — these tests don't touch them
     and the singleton invariant must survive."""
     async with session_factory() as s:
-        await s.execute(
-            text("TRUNCATE TABLE transactions, accounts RESTART IDENTITY CASCADE")
-        )
+        await s.execute(text("TRUNCATE TABLE transactions, accounts RESTART IDENTITY CASCADE"))
         await s.commit()
     yield
 
@@ -152,19 +150,25 @@ async def test_cleared_updates_in_place(session_factory):
     # 2. Simulate a Phase 4/5/6 manual edit: user assigns a category, locks the row,
     #    overrides description/mcc, and pins the attributed_day. These six columns
     #    plus structural ones must survive a subsequent importer write — D-10.
+    #    `category_id` references a REAL seeded category — migration 0004 added the
+    #    `fk_transactions_category` FK (D-03), so a fictitious id no longer inserts.
+    async with session_factory() as s:
+        category_id = (
+            await s.execute(text("SELECT id FROM categories WHERE name = 'Groceries'"))
+        ).scalar_one()
     async with session_factory() as s, s.begin():
         await s.execute(
             text(
                 "UPDATE transactions SET "
                 "  is_user_locked = true, "
-                "  category_id = 42, "
+                "  category_id = :cid, "
                 "  category_source = 'manual', "
                 "  description = 'user note', "
                 "  mcc = 5411, "
                 "  attributed_day = '2026-05-01' "
                 "WHERE account_id = :a AND source_tx_id = 'HOLD-FIXTURE-ID-1'"
             ),
-            {"a": account_id},
+            {"a": account_id, "cid": category_id},
         )
     # Capture frozen structural fields before the upsert so we can prove they
     # don't move (created_at and time both pre-upsert).
@@ -228,7 +232,7 @@ async def test_cleared_updates_in_place(session_factory):
 
     # FROZEN — manual-edit columns (Phases 4-6).
     assert row.is_user_locked is True, "is_user_locked must NOT be cleared by importer"
-    assert row.category_id == 42, "category_id must NOT be reset by importer"
+    assert row.category_id == category_id, "category_id must NOT be reset by importer"
     assert row.category_source == "manual", "category_source must NOT be reset by importer"
     assert row.description == "user note", (
         "description must remain user's edit; importer's 'from importer cleared' "
@@ -238,9 +242,7 @@ async def test_cleared_updates_in_place(session_factory):
         "mcc must remain user's edit; importer's 9999 must NOT overwrite "
         "(D-10 — mcc absent from set_={...})"
     )
-    assert str(row.attributed_day) == "2026-05-01", (
-        "attributed_day must NOT be reset by importer"
-    )
+    assert str(row.attributed_day) == "2026-05-01", "attributed_day must NOT be reset by importer"
 
     # FROZEN — structural columns (identity + audit).
     assert row.id == pre.id, "primary key must not move"
