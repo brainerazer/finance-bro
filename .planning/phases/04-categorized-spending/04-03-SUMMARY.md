@@ -150,6 +150,10 @@ None. All security-relevant surface introduced (the `fetch_for_categorize` locke
 - Plan 04 (run-over-history sweep) can reuse `compile_rules`, `categorize_rows`, `fetch_for_categorize`, and `apply_categories` verbatim — the D-11 single-engine promise holds at the repo+engine seam.
 - The `tests/test_lock_invariant.py` file is structured so Plan 04 can add the history-sweep half alongside the existing import-path test.
 
+## Self-Check: PASSED
+
+All 6 created/modified key files present on disk; all 4 commits (`fcad6f5`, `b143556`, `a0fb932`, `98ae147`) present in git history.
+
 ---
 *Phase: 04-categorized-spending*
 *Completed: 2026-05-30*
