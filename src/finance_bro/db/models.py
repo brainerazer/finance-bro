@@ -60,7 +60,11 @@ class Transaction(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # Forward-looking — Phase 1 never reads, later phases retrofit-painfully
     hold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    category_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    category_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("categories.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     category_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_user_locked: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
@@ -102,19 +106,13 @@ class ImportRun(Base):
     run_kind: Mapped[str] = mapped_column(Text, nullable=False)
     window_from: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     window_to: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'pending'")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     statement_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     inserted: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
+    started_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -124,9 +122,7 @@ class SchedulerState(Base):
     __tablename__ = "scheduler_state"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'running'")
-    )
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'running'"))
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     since: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
@@ -155,6 +151,55 @@ class FxRate(Base):
         # currency, then rate_date — Postgres scans backward for the DESC limit).
         Index("ix_fx_rates_currency_rate_date", "currency", "rate_date"),
     )
+
+
+class Category(Base):
+    """Editable spending taxonomy — CAT-03 / D-01.
+
+    Seeded with a ~15-category default set by migration 0004; fully editable
+    afterward (rename/recolor/add/delete). `transactions.category_id` and
+    `rules.category_id` reference this via FK ON DELETE RESTRICT (D-03/D-15):
+    a category referenced by any rule or transaction cannot be deleted.
+    """
+
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (UniqueConstraint("name", name="uq_categories_name"),)
+
+
+class Rule(Base):
+    """A priority-ordered categorization rule — CAT-01 / CAT-02 / D-04.
+
+    `predicate` is a flat AND-only condition AST (D-05/D-06) stored as JSONB and
+    evaluated by the pure `categorizer/` interpreter — never `eval`'d. `priority`
+    is UNIQUE (forbidding ties — Pitfall 6); first-match-wins evaluation orders by
+    `priority ASC, id ASC`. `description` is a human label, NOT a predicate field
+    (D-07). MCC default coverage ships as ordinary seeded rows (D-04).
+    """
+
+    __tablename__ = "rules"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    category_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("categories.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    predicate: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (UniqueConstraint("priority", name="uq_rules_priority"),)
 
 
 class TrackedFxCurrency(Base):
