@@ -25,11 +25,14 @@ Phase-2 status + backfill routers all mount at /api/* with no prefix nor
 middleware (DEP-02 — Tailscale/LAN is the trust boundary in v1).
 """
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 
@@ -45,8 +48,12 @@ from finance_bro.core import logging as logging_cfg
 from finance_bro.core.settings import get_settings
 from finance_bro.db.engine import get_session_factory, init_engine
 from finance_bro.importers.monobank import MonobankImporter
+from finance_bro.importers.nbu import NbuFxImporter
 from finance_bro.importers.rate_limit import RateLimitGate
 from finance_bro.scheduler.runner import SchedulerRunner
+from finance_bro.services.fx_bootstrap import FxBootstrapService
+
+KYIV = ZoneInfo("Europe/Kyiv")
 
 
 @asynccontextmanager
@@ -61,8 +68,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     session_factory = get_session_factory()
     gate = RateLimitGate(session_factory)
     importer = MonobankImporter(settings.mono_token, gate)
+    # NBU FX source (D-02): no token, no rate-limit gate. Its httpx client MUST
+    # be closed in the finally block (CR-01) — under filterwarnings=["error"]
+    # an unclosed AsyncClient escalates to a hard failure.
+    nbu_importer = NbuFxImporter()
     scheduler = AsyncIOScheduler()
-    runner = SchedulerRunner(session_factory=session_factory, importer=importer)
+    runner = SchedulerRunner(
+        session_factory=session_factory,
+        importer=importer,
+        fx_importer=nbu_importer,
+    )
+    fx_bootstrap = FxBootstrapService(session_factory, nbu_importer)
+    bootstrap_task: asyncio.Task[None] | None = None
 
     # CR-01: any DB-touching call (recover_in_flight, read_state) MUST run
     # inside the try/finally that owns the httpx.AsyncClient (held by
@@ -85,7 +102,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 coalesce=True,  # D-03
                 misfire_grace_time=30,
             )
+            # D-06: daily NBU fetch at 16:00 Europe/Kyiv. CronTrigger with an
+            # explicit ZoneInfo fires at the correct local wall-clock time
+            # across the DST boundary (Pitfall 5). misfire_grace_time=3600
+            # tolerates a NAS that was asleep at 16:00.
+            scheduler.add_job(
+                runner.fx_tick,
+                CronTrigger(hour=16, minute=0, timezone=KYIV),
+                id="fx_tick",
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=3600,
+            )
             scheduler.start()
+            # D-07: fire-and-forget the 12-month backfill so it never blocks
+            # startup (the lifespan yields immediately; the health check stays
+            # responsive while NBU fills in the background).
+            bootstrap_task = asyncio.create_task(fx_bootstrap.maybe_bootstrap_fx_all_tracked())
 
         app.state.scheduler = scheduler
         app.state.runner = runner
@@ -94,7 +127,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     finally:
         if scheduler.running:
             scheduler.shutdown(wait=False)  # Pitfall 8
+        if bootstrap_task is not None:
+            bootstrap_task.cancel()
+        # CR-01: both HTTP-client owners closed in the finally that owns them.
         await runner.aclose()
+        await nbu_importer.aclose()
 
 
 app = FastAPI(title="finance-bro", lifespan=lifespan)
