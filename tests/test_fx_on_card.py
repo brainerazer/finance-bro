@@ -8,24 +8,35 @@ operation). The rollup must label fx_source == "mono_card" and compute
 uah_amount_minor = EUR amount_minor x NBU EUR/UAH rate — i.e. it converts the
 ACCOUNT currency (EUR) by the NBU EUR rate, not the USD operation amount.
 """
+
 from decimal import ROUND_HALF_EVEN, Decimal
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _truncate_fx(session_factory):
+    """Hermetic isolation — wipe fx_rates/transactions/accounts before the test
+    so only this test's EUR rate is present (fx_rates is NOT in the conftest
+    truncate list)."""
+    async with session_factory() as s:
+        await s.execute(
+            text("TRUNCATE TABLE fx_rates, transactions, accounts RESTART IDENTITY CASCADE")
+        )
+        await s.commit()
+    yield
+
+
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="mono_card rollup labelling lands in a later 03 plan", strict=False)
 async def test_card_foreign_op_uses_account_currency_nbu(session_factory):
     from finance_bro.db.transaction_repo import TransactionRepo
 
     eur_rate = Decimal("47.2500")
     amount_minor = -5000  # -50.00 EUR
     expected_uah_minor = int(
-        ((Decimal(amount_minor) / 100) * eur_rate).quantize(
-            Decimal("0.01"), ROUND_HALF_EVEN
-        )
-        * 100
+        ((Decimal(amount_minor) / 100) * eur_rate).quantize(Decimal("0.01"), ROUND_HALF_EVEN) * 100
     )
 
     async with session_factory() as s:
@@ -36,9 +47,7 @@ async def test_card_foreign_op_uses_account_currency_nbu(session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='card-eur'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='card-eur'"))
         ).scalar_one()
         await s.execute(
             text(

@@ -5,10 +5,16 @@ All money on the JSON boundary is integer minor units typed as Python `int`
 FX-01 / threat T6. Currency is the
 ISO-4217 alpha string (length 3). The full Mono `statementItem` payload is
 preserved verbatim as `raw_payload: dict` (D-10, ING-03).
+
+EXCEPTION (Phase 3, D-10): `TransactionOut.fx_rate` is transported as a
+Decimal-as-string (e.g. "43.80330000"), never a float. It is the one deliberate
+departure from "money is always int minor units" — an FX rate is not money, and
+string transport preserves the exact NBU rate so the JS side never reintroduces
+float drift (CLAUDE.md §Money).
 """
 
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +49,15 @@ class TransactionOut(BaseModel):
     # Always populated — Transaction.hold is non-null with server_default 'false'.
     hold: bool
     raw_payload: dict[str, Any]
+    # Phase 3 (D-10/D-11/D-12) — UAH rollup computed ON READ via the LATERAL join
+    # (FX-03; never a denormalized column). For native-UAH rows uah_amount_minor
+    # == amount_minor and fx_rate == "1.00000000". When no NBU rate is available
+    # the value fields are null and fx_stale is True (the row still appears).
+    uah_amount_minor: int | None = None
+    fx_rate: str | None = None  # Decimal-as-string ("43.80330000"); never float
+    fx_rate_date: date | None = None
+    fx_source: Literal["native_uah", "mono_card", "nbu"]
+    fx_stale: bool
 
 
 class ImportResultOut(BaseModel):

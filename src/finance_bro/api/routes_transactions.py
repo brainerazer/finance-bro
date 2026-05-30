@@ -4,6 +4,13 @@ Phase 1 ships a single read endpoint with no pagination, no filtering. Scoped
 to the first card (the only account being polled in Phase 1 — D-04). When
 no card exists yet (no import has run), returns an empty list rather than
 404 so the frontend can render an empty dashboard before the first import.
+
+Phase 3 (FX-03/FX-04): every row carries a UAH rollup computed ON READ. The
+LATERAL join + per-row `fx_rollup.rollup(...)` happens in
+`TransactionRepo.list_for_account` (the repo is the single owner of the read
+SQL, and the locked FX read tests exercise it directly), so the route simply
+validates the enriched mapping rows — including the five FX fields — into
+`TransactionOut`. The rollup is never denormalized onto `transactions` (FX-03).
 """
 
 from typing import Annotated
