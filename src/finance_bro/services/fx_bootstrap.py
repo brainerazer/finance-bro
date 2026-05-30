@@ -59,19 +59,15 @@ class FxBootstrapService:
 
         # 1. Freshness check (session block). Already backfilled -> no-op.
         async with self._session_factory() as session, session.begin():
-            count = await FxRateRepo(session).count_in_window(
-                currency, today - FRESHNESS_WINDOW
-            )
+            count = await FxRateRepo(session).count_in_window(currency, today - FRESHNESS_WINDOW)
         if count >= BOOTSTRAP_THRESHOLD:
             _log.info("fx.bootstrap.skip", currency=currency, count=count)
             return
 
         # 2. HTTP fetch OUTSIDE any session (a slow NBU call must not hold a tx).
         try:
-            rows = await self._importer.fetch_range(
-                currency, today - BOOTSTRAP_WINDOW, today
-            )
-        except Exception as exc:  # noqa: BLE001 - any NBU failure is logs+last_error only (D-08)
+            rows = await self._importer.fetch_range(currency, today - BOOTSTRAP_WINDOW, today)
+        except Exception as exc:  # any NBU failure is logs+last_error only (D-08)
             async with self._session_factory() as session, session.begin():
                 await TrackedFxCurrencyRepo(session).mark_attempted(currency, str(exc))
             _log.warning("fx.bootstrap.fetch_failed", currency=currency, error=str(exc))
@@ -80,9 +76,7 @@ class FxBootstrapService:
         if not rows:
             # D-16: empty result -> record last_error, leave bootstrap_done false.
             async with self._session_factory() as session, session.begin():
-                await TrackedFxCurrencyRepo(session).mark_attempted(
-                    currency, "no rates published"
-                )
+                await TrackedFxCurrencyRepo(session).mark_attempted(currency, "no rates published")
             _log.info("fx.bootstrap.empty", currency=currency)
             return
 
@@ -105,5 +99,5 @@ class FxBootstrapService:
         for currency in currencies:
             try:
                 await self.maybe_bootstrap_fx(currency)
-            except Exception:  # noqa: BLE001 - per-currency isolation
+            except Exception:  # per-currency isolation: log + continue
                 _log.exception("fx.bootstrap.currency_failed", currency=currency)

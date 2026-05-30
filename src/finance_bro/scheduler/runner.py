@@ -99,7 +99,8 @@ class SchedulerRunner:
         return self._cached_state
 
     async def aclose(self) -> None:
-        await self._importer.aclose()
+        if self._importer is not None:
+            await self._importer.aclose()
 
     # ---- enqueue helpers (used by lifespan + Plan 02-04 routes) ----
 
@@ -185,6 +186,8 @@ class SchedulerRunner:
         Raises MonoAuthError/MonoRateLimitError/MonoTransientError — caller (tick)
         handles them.
         """
+        if self._importer is None:
+            return
         async with self._session_factory() as session, session.begin():
             existing = await AccountRepo(session).list_all()
             if existing:
@@ -256,6 +259,14 @@ class SchedulerRunner:
         if self._cached_state[0] != "running":
             return
 
+        # The Mono tick requires a Mono importer. It is optional on the runner
+        # only so an fx-tick-only construction is possible; the lifespan always
+        # provides one for the Mono path. A None here is a wiring error.
+        if self._importer is None:
+            _log.warning("scheduler.tick.no_importer")
+            return
+        mono = self._importer
+
         # WR-03: sweep stale in_flight rows every tick (cheap UPDATE, no-op
         # when nothing is stale). The 5-min threshold is meaningless in a
         # long-lived process if recover_in_flight only runs at startup —
@@ -312,7 +323,7 @@ class SchedulerRunner:
                 return
             items = [
                 t
-                async for t in self._importer.fetch_statement(
+                async for t in mono.fetch_statement(
                     account.source_account_id, run.window_from, run.window_to
                 )
             ]
@@ -385,7 +396,7 @@ class SchedulerRunner:
         for currency in currencies:
             try:
                 await self._fx_tick_currency(currency, bootstrap, today)
-            except Exception:  # noqa: BLE001 - per-currency isolation (D-17)
+            except Exception:  # per-currency isolation (D-17): log + continue
                 _log.exception("fx.tick.currency.failed", currency=currency)
 
     async def _fx_tick_currency(

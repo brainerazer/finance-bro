@@ -1,6 +1,6 @@
 """FX-02 / D-08 / D-16 / D-17 — the daily fx_tick job.
 
-RED scaffold for a later 03 plan (runner.fx_tick not yet built).
+Live test (Plan 03-04): runner.fx_tick is built.
 
 Asserts the locked contract:
 (a) currencies are processed in `ORDER BY currency` (seed USD/EUR/CHF ->
@@ -16,7 +16,26 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _hermetic_tracked_fx(session_factory):
+    """Hermetic isolation: tracked_fx_currencies is NOT in the conftest client
+    truncate list, and sibling tests (test_fx_repos) leak first-seen AAA/ZZZ
+    rows into it. The ORDER BY assertion below pins an exact currency list, so
+    truncate before and after each test in this module. Mirrors the per-test
+    autouse-truncate pattern used by the direct-session FX tests in Plan 03-03.
+    """
+    truncate = text("TRUNCATE TABLE tracked_fx_currencies RESTART IDENTITY CASCADE")
+    async with session_factory() as s:
+        await s.execute(truncate)
+        await s.commit()
+    yield
+    async with session_factory() as s:
+        await s.execute(truncate)
+        await s.commit()
 
 
 def _seed_tracked():
