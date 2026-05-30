@@ -193,3 +193,39 @@ class RuleUpdateIn(BaseModel):
 
 class RuleReorderIn(BaseModel):
     ordered_ids: list[int] = Field(min_length=1)
+
+
+# ----- Phase 4 (CAT-05) — Run-rules-over-history preview/commit DTOs -----
+
+
+class CategoryChange(BaseModel):
+    """One row's old→new category transition in the history-sweep diff (D-12).
+    `old_category_id` / `new_category_id` are NULL for an uncategorized side."""
+
+    transaction_id: int
+    old_category_id: int | None = None
+    new_category_id: int | None = None
+
+
+class RunPreviewOut(BaseModel):
+    """The full diff a `POST /api/rules/run/preview` returns (D-12): per-row
+    changes plus the counts, plus the sha256 staleness `token` the matching
+    commit must echo back (D-13)."""
+
+    changed_count: int
+    overwritten_count: int
+    skipped_locked_count: int
+    changes: list[CategoryChange]
+    token: str
+
+
+class RunCommitIn(BaseModel):
+    """The commit request body — carries only the staleness `token` issued by a
+    prior preview (D-13). The account is selected the same way preview selects
+    it (first card, single-card v1 model)."""
+
+    token: str
+
+
+class RunCommitOut(BaseModel):
+    applied: int

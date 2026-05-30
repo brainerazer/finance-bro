@@ -62,9 +62,7 @@ async def _make_account(session_factory) -> int:
 async def _category_id(session_factory, name: str) -> int:
     async with session_factory() as s:
         return (
-            await s.execute(
-                text("SELECT id FROM categories WHERE name = :n"), {"n": name}
-            )
+            await s.execute(text("SELECT id FROM categories WHERE name = :n"), {"n": name})
         ).scalar_one()
 
 
@@ -115,10 +113,7 @@ async def _tx_state(session_factory, acc_id: int) -> dict[str, tuple]:
                 {"a": acc_id},
             )
         ).all()
-    return {
-        r.source_tx_id: (r.category_id, r.category_source, r.is_user_locked)
-        for r in rows
-    }
+    return {r.source_tx_id: (r.category_id, r.category_source, r.is_user_locked) for r in rows}
 
 
 async def _id_map(session_factory, acc_id: int) -> dict[str, int]:
@@ -144,26 +139,45 @@ async def _seed_mixed_account(session_factory) -> tuple[int, int, int]:
     transport = await _category_id(session_factory, "Transport")
     # (a) untouched grocery debit, no category yet -> should become Groceries.
     await _insert_tx(
-        session_factory, acc_id,
-        source_tx_id="a-null-grocery", amount_minor=-1500, mcc=5411, description="ATB",
+        session_factory,
+        acc_id,
+        source_tx_id="a-null-grocery",
+        amount_minor=-1500,
+        mcc=5411,
+        description="ATB",
     )
     # (b) rule-categorized but in the WRONG bucket (Transport) -> grocery rule moves
     #     it to Groceries (an OVERWRITE: old non-None -> new differs).
     await _insert_tx(
-        session_factory, acc_id,
-        source_tx_id="b-wrong-rule", amount_minor=-1700, mcc=5411, description="Silpo",
-        category_id=transport, category_source="rule",
+        session_factory,
+        acc_id,
+        source_tx_id="b-wrong-rule",
+        amount_minor=-1700,
+        mcc=5411,
+        description="Silpo",
+        category_id=transport,
+        category_source="rule",
     )
     # (c) no-match row -> stays/becomes NULL.
     await _insert_tx(
-        session_factory, acc_id,
-        source_tx_id="c-no-match", amount_minor=-2000, mcc=9999, description="Bolt",
+        session_factory,
+        acc_id,
+        source_tx_id="c-no-match",
+        amount_minor=-2000,
+        mcc=9999,
+        description="Bolt",
     )
     # (d) LOCKED manual grocery debit -> never touched by the sweep.
     await _insert_tx(
-        session_factory, acc_id,
-        source_tx_id="d-locked", amount_minor=-3000, mcc=5411, description="Manual",
-        category_id=transport, category_source="manual", is_user_locked=True,
+        session_factory,
+        acc_id,
+        source_tx_id="d-locked",
+        amount_minor=-3000,
+        mcc=5411,
+        description="Manual",
+        category_id=transport,
+        category_source="manual",
+        is_user_locked=True,
     )
     return acc_id, groceries, transport
 
@@ -223,7 +237,7 @@ async def test_commit_on_matching_token_applies(session_factory):
 
 @pytest.mark.asyncio
 async def test_commit_with_stale_token_raises_and_changes_nothing(session_factory):
-    acc_id, groceries, transport = await _seed_mixed_account(session_factory)
+    acc_id, _groceries, _transport = await _seed_mixed_account(session_factory)
     svc = RulesHistoryService(get_session_factory())
 
     preview = await svc.preview(acc_id)
@@ -253,7 +267,7 @@ async def test_commit_with_stale_token_raises_and_changes_nothing(session_factor
 
 @pytest.mark.asyncio
 async def test_locked_row_never_in_changes_and_unchanged_after_commit(session_factory):
-    acc_id, groceries, transport = await _seed_mixed_account(session_factory)
+    acc_id, _groceries, transport = await _seed_mixed_account(session_factory)
     svc = RulesHistoryService(get_session_factory())
 
     preview = await svc.preview(acc_id)
