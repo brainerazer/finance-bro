@@ -54,6 +54,7 @@ created: 2026-05-30
 | FX-04 | mono_card: UAH = account-amount × NBU rate, NOT double-converted (property test) | integration | `uv run pytest tests/test_fx_on_card.py -x` | ❌ W0 |
 | FX-02 | attributed_day backfill + NOT NULL migration is Kyiv-correct | integration | `uv run pytest tests/test_attributed_day_migration.py -x` | ❌ W0 |
 | FX-02 | Lazy auto-add: new currency → tracked row + bootstrap; subsequent read non-null | integration | `uv run pytest tests/test_fx_bootstrap_lazy.py -x` | ❌ W0 |
+| FX-02 | fx_tick per-currency loop: ORDER BY currency, re-bootstrap incomplete currency, empty→last_error, error isolation, no scheduler_state write (D-08/D-16/D-17) | unit/integration | `uv run pytest tests/test_fx_tick.py -x` | ❌ W0 |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky · W0 = created in Wave 0*
 
@@ -68,6 +69,7 @@ created: 2026-05-30
 - [ ] `tests/test_fx_stale_fallback.py` — D-12/D-13 (no-rate → null + fx_stale, row still appears)
 - [ ] `tests/test_fx_bootstrap_lazy.py` — D-15 (lazy auto-add)
 - [ ] `tests/test_fx_cron_dst.py` — D-06 (CronTrigger fire time across DST)
+- [ ] `tests/test_fx_tick.py` — FX-02/D-17 (per-currency loop: ORDER BY, re-bootstrap incomplete, empty→last_error, error isolation, no scheduler_state write per D-08)
 - [ ] `tests/test_attributed_day_migration.py` — D-09 (backfill + NOT NULL)
 - [ ] NBU fixtures: `tests/fixtures/nbu_usd_range.json`, `nbu_empty.json` (mirror real `exchange_site` shape, incl. `calcdate`)
 - [ ] No new framework install — pytest/respx/freezegun/testcontainers all present.
