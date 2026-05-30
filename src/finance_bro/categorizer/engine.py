@@ -14,7 +14,9 @@ sweep (Plan 04): it skips SKIP rows from its output entirely.
 This module is pure — no DB, no I/O.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from finance_bro.categorizer.fields import RowView
 from finance_bro.categorizer.interpreter import eval_condition
@@ -46,6 +48,37 @@ class CompiledRule:
     id: int
     category_id: int
     predicate: RulePredicate
+
+
+class RuleRowLike(Protocol):
+    """Structural shape of a stored rule (the ORM `Rule` satisfies it at runtime)
+    — kept as a Protocol so this module stays pure (no SQLAlchemy import). The
+    ORM exposes these as `Mapped[...]` descriptors (which yield `int`/`dict` on
+    instance access), so callers passing ORM rows `cast(...)` at the boundary —
+    the runtime values are exactly these plain types."""
+
+    priority: int
+    id: int
+    category_id: int
+    predicate: dict[str, Any]
+
+
+def compile_rules(rules: Sequence[RuleRowLike]) -> list[CompiledRule]:
+    """Adapt stored rules (priority-ordered ORM rows with a JSON-dict predicate)
+    into `CompiledRule`s the engine evaluates. The predicate JSON is validated
+    into the closed-op AST here — the ONE place the at-rest JSON becomes a
+    `RulePredicate` for evaluation (mirrors the route DTO's boundary validation,
+    V5). The caller passes rows already sorted `priority ASC, id ASC`
+    (`RuleRepo.list_active_ordered`); order is preserved (Pitfall 6)."""
+    return [
+        CompiledRule(
+            priority=r.priority,
+            id=r.id,
+            category_id=r.category_id,
+            predicate=RulePredicate.model_validate(r.predicate),
+        )
+        for r in rules
+    ]
 
 
 def categorize_row(row: RowView, rules: list[CompiledRule]) -> int | None | _Skip:

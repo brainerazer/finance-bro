@@ -17,6 +17,7 @@ from sqlalchemy import literal_column, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from finance_bro.categorizer.fields import RowView
 from finance_bro.db.models import Transaction
 from finance_bro.importers.base import CanonicalTransaction
 from finance_bro.importers.currency_map import numeric_to_alpha
@@ -132,6 +133,73 @@ class TransactionRepo:
         inserted = sum(1 for r in rows_back if r.inserted)
         updated = len(rows_back) - inserted
         return (inserted, updated)
+
+    # D-09 / Pitfall 1: locked rows are filtered IN SQL (`NOT is_user_locked`),
+    # so they never reach the engine — defense-in-depth alongside the engine's
+    # own SKIP. `NOT is_deleted` keeps soft-deleted rows out. Bound params only
+    # (`= ANY(:ids)`); never f-string SQL (T-4-sqli).
+    _FETCH_FOR_CATEGORIZE_SQL = text(
+        """
+        SELECT id, account_id, amount_minor, currency, hold, mcc, description,
+               category_id, is_user_locked, raw_payload
+        FROM transactions
+        WHERE account_id = :account_id
+          AND source_tx_id = ANY(:ids)
+          AND NOT is_user_locked
+          AND NOT is_deleted
+        """
+    )
+
+    async def fetch_for_categorize(
+        self,
+        account_id: int,
+        touched_source_tx_ids: list[str],
+    ) -> list[RowView]:
+        """Load the non-locked, non-deleted touched rows as pure `RowView`s for
+        the engine (D-11). Locked rows are excluded in SQL (D-09 / Pitfall 1).
+        Empty input short-circuits (no `ANY('{}')` round-trip)."""
+        if not touched_source_tx_ids:
+            return []
+        result = await self._s.execute(
+            self._FETCH_FOR_CATEGORIZE_SQL,
+            {"account_id": account_id, "ids": touched_source_tx_ids},
+        )
+        rows: list[RowView] = []
+        for m in result.mappings().all():
+            # raw_payload may be NULL in theory; mirror `_op_currency_alpha`'s
+            # never-raise discipline by defaulting to an empty dict.
+            raw: dict[str, Any] = m["raw_payload"] or {}
+            rows.append(
+                RowView(
+                    id=m["id"],
+                    amount_minor=m["amount_minor"],
+                    hold=m["hold"],
+                    is_user_locked=m["is_user_locked"],
+                    category_id=m["category_id"],
+                    description=m["description"],
+                    mcc=m["mcc"],
+                    account_id=m["account_id"],
+                    currency=m["currency"],
+                    raw_payload=raw,
+                )
+            )
+        return rows
+
+    # Targeted, parameterized write-back. NEVER references is_user_locked in the
+    # SET clause — locked rows are excluded upstream by fetch_for_categorize and
+    # by the engine's SKIP. A (id, None) update writes category_id NULL with
+    # category_source='rule' (D-02: the row was evaluated, matched nothing — it
+    # is stamped 'rule', never silently bucketed into a real category).
+    _APPLY_CATEGORY_SQL = text(
+        "UPDATE transactions SET category_id = :cid, category_source = 'rule' WHERE id = :tid"
+    )
+
+    async def apply_categories(self, updates: list[tuple[int, int | None]]) -> None:
+        """Write `category_id` (+ `category_source='rule'`) for exactly the rows
+        the engine returned. Small batch is fine for single-user volumes; each
+        UPDATE is parameterized (T-4-sqli). Rows not in `updates` are untouched."""
+        for tid, cid in updates:
+            await self._s.execute(self._APPLY_CATEGORY_SQL, {"cid": cid, "tid": tid})
 
     async def list_for_account(self, account_id: int) -> list[dict[str, Any]]:
         """Read path: every row joined with its carry-forward NBU rate via the

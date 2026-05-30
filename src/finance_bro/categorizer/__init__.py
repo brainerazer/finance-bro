@@ -17,6 +17,7 @@ from finance_bro.categorizer.engine import (
     CompiledRule,
     categorize_row,
     categorize_rows,
+    compile_rules,
 )
 from finance_bro.categorizer.fields import RowView, make_row
 from finance_bro.categorizer.interpreter import eval_condition
@@ -47,6 +48,7 @@ __all__ = [
     "RulePredicate",
     "categorize_row",
     "categorize_rows",
+    "compile_rules",
     "eval_condition",
     "make_row",
 ]

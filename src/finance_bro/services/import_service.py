@@ -17,10 +17,14 @@ no-op (one row per Mono id), even though the SQL underneath is now an UPDATE.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from finance_bro.categorizer import categorize_rows, compile_rules
+from finance_bro.categorizer.engine import RuleRowLike
 from finance_bro.db.account_repo import AccountRepo
+from finance_bro.db.rule_repo import RuleRepo
 from finance_bro.db.transaction_repo import TransactionRepo
 from finance_bro.importers.monobank import MonobankImporter
 
@@ -86,7 +90,26 @@ class ImportService:
         # Step 4: idempotent upsert (Phase 2: ON CONFLICT DO UPDATE; D-10 mutates
         # only hold/amount_minor/raw_payload — all other columns frozen by omission).
         async with self._session_factory() as session, session.begin():
-            inserted, updated = await TransactionRepo(session).insert_many(card.id, items)
+            tx_repo = TransactionRepo(session)
+            inserted, updated = await tx_repo.insert_many(card.id, items)
+            # Step 4b: auto-categorize the touched rows (D-10/D-11). Reuse the
+            # PURE engine verbatim — the same call the Plan 04 history sweep makes.
+            # Locked rows are excluded twice over: fetch_for_categorize filters
+            # `NOT is_user_locked` in SQL (D-09) AND the engine returns SKIP. The
+            # frozen-by-omission upsert above already guarantees a re-import can
+            # never clobber category columns, so this step is purely additive and
+            # leaves a manual lock intact (CAT-04). Touched ids come from the items
+            # just upserted (Open Question 2: import categorizes only touched rows).
+            # ORM `Rule` rows satisfy RuleRowLike at runtime (Mapped[int] -> int,
+            # Mapped[dict] -> dict on instance access); cast at this boundary.
+            rules = compile_rules(
+                cast("list[RuleRowLike]", await RuleRepo(session).list_active_ordered())
+            )
+            rows = await tx_repo.fetch_for_categorize(
+                card.id, touched_source_tx_ids=[t.source_tx_id for t in items]
+            )
+            updates = categorize_rows(rows, rules)
+            await tx_repo.apply_categories(updates)
         # Phase 1 ImportResultOut shape preserved (Plan 02-04 reshapes the route).
         # `inserted_total` accounts for both first-insert rows and hold→cleared updates;
         # Phase 1's "second-import is a no-op" semantics still hold for the user (one row
