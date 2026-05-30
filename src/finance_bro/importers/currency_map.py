@@ -9,6 +9,12 @@ _NUM_TO_ALPHA: dict[int, str] = {
     980: "UAH",
     840: "USD",
     978: "EUR",
+    # Verified long tail (D-15 / Claude's Discretion): currencies a Mono card or
+    # the lazy FX-bootstrap path may surface. Keep raise-on-unknown below intact —
+    # the Mono account/transaction insert path depends on it.
+    985: "PLN",
+    826: "GBP",
+    756: "CHF",
 }
 
 

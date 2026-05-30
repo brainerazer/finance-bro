@@ -9,6 +9,7 @@ quirks are confined to the adapter that produced the raw payload.
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Protocol
 
 
@@ -58,3 +59,22 @@ class ImporterProtocol(Protocol):
         since: datetime,
         until: datetime,
     ) -> AsyncIterator[CanonicalTransaction]: ...
+
+
+@dataclass(frozen=True)
+class FxRateRow:
+    """One (date, currency) NBU rate. `rate` is always a Decimal — never a
+    float (Pitfall 1). Produced by FxRatesPort.fetch_range, persisted by
+    FxRateRepo.upsert_many (D-02)."""
+
+    rate_date: date
+    currency: str
+    rate: Decimal
+
+
+class FxRatesPort(Protocol):
+    """The FX-source port (D-02). NbuFxImporter is the only implementation in
+    v1; a future ECB/other source slots in behind the same contract without
+    touching the rollup or bootstrap callers."""
+
+    async def fetch_range(self, currency: str, start: date, end: date) -> list[FxRateRow]: ...

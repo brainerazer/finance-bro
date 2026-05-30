@@ -1,8 +1,7 @@
 """FX-02 — NbuFxImporter.fetch_range against the NBU exchange_site endpoint.
 
-RED scaffold for a later 03 plan (NbuFxImporter not yet built). The import
-happens inside each test body and the tests are xfail(strict=False) so
-collection stays clean while the target does not yet exist.
+NbuFxImporter is implemented in Plan 03-02; the xfail Wave-0 marks were removed
+when this plan landed so these now assert as live PASS tests (regression guard).
 
 Locked behavior contract (Pitfall 1 + D-16):
 - `exchangedate` (dd.mm.yyyy) parses via %d.%m.%Y to a date.
@@ -11,6 +10,7 @@ Locked behavior contract (Pitfall 1 + D-16):
 - The AsyncClient MUST be closed via aclose() — pyproject filterwarnings=["error"]
   escalates an unclosed client to a hard failure.
 """
+
 import json
 from datetime import date
 from decimal import Decimal
@@ -24,7 +24,6 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="NbuFxImporter impl lands in a later 03 plan", strict=False)
 async def test_fetch_range_parses_rows_as_decimal():
     from finance_bro.importers.nbu import NbuFxImporter
 
@@ -48,7 +47,6 @@ async def test_fetch_range_parses_rows_as_decimal():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="NbuFxImporter impl lands in a later 03 plan", strict=False)
 async def test_fetch_range_empty_yields_empty_list():
     from finance_bro.importers.nbu import NbuFxImporter
 
