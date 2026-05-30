@@ -21,8 +21,8 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 
 ## Phases
 
-- [ ] **Phase 1: First Real Transaction** — token entry → poll one Mono account → row visible via API
-- [ ] **Phase 2: Reliable Sync** — automatic 60s polling, holds handling, 12-month backfill, sync status visible
+- [x] **Phase 1: First Real Transaction** — token entry → poll one Mono account → row visible via API
+- [x] **Phase 2: Reliable Sync** — automatic 60s polling, holds handling, 12-month backfill, sync status visible
 - [x] **Phase 3: UAH Truth** — every foreign-currency transaction has a correct UAH rollup at NBU txn-day rate
 - [ ] **Phase 4: Categorized Spending** — rules-driven categorization with default taxonomy; manual edits never overwritten
 - [ ] **Phase 5: Honest Totals** — internal transfers and refunds detected and netted; spending math stops lying
