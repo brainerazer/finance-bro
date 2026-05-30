@@ -33,8 +33,11 @@ ROLLUP_SQL = text(
     """
     SELECT t.id, t.account_id, t.source_tx_id, t.amount_minor, t.currency,
            t.time, t.hold, t.raw_payload, t.attributed_day,
+           t.category_id, t.category_source,
+           c.name AS category_name, c.color AS category_color,
            fx.rate AS fx_rate, fx.rate_date AS fx_rate_date
     FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
     LEFT JOIN LATERAL (
         SELECT rate, rate_date FROM fx_rates
         WHERE currency = t.currency AND rate_date <= t.attributed_day
