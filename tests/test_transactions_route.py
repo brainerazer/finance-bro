@@ -86,10 +86,13 @@ async def test_hold_field_in_response(client, session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "  (account_id, source_tx_id, amount_minor, currency, time, raw_payload, hold) "
+                "  (account_id, source_tx_id, amount_minor, currency, time, raw_payload, hold, "
+                "   attributed_day) "
                 "VALUES "
-                "  (:a, 'tx-cleared', -100, 'UAH', now(), '{}'::jsonb, false), "
-                "  (:a, 'tx-held',    -200, 'UAH', now(), '{}'::jsonb, true)"
+                "  (:a, 'tx-cleared', -100, 'UAH', now(), '{}'::jsonb, false, "
+                "   (now() AT TIME ZONE 'Europe/Kyiv')::date), "
+                "  (:a, 'tx-held',    -200, 'UAH', now(), '{}'::jsonb, true, "
+                "   (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )

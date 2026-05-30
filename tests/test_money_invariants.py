@@ -29,8 +29,10 @@ async def test_amount_minor_is_bigint_signed(engine, session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload) "
-                "VALUES (:a, 'neg', -9999999999, 'UAH', now(), '{}'::jsonb)"
+                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload, "
+                " attributed_day) "
+                "VALUES (:a, 'neg', -9999999999, 'UAH', now(), '{}'::jsonb, "
+                " (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )

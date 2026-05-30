@@ -10,12 +10,16 @@ attributed_day) — is FROZEN BY OMISSION. The `(xmax = 0)` returning trick
 distinguishes inserts from updates so the runner can log both counts.
 """
 
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import literal_column, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finance_bro.db.models import Transaction
 from finance_bro.importers.base import CanonicalTransaction
+
+_KYIV = ZoneInfo("Europe/Kyiv")
 
 
 class TransactionRepo:
@@ -58,6 +62,15 @@ class TransactionRepo:
                 "description": t.description,
                 "mcc": t.mcc,
                 "hold": t.hold,
+                # D-09: attributed_day is NOT NULL and frozen on first write. The
+                # importer supplies the Kyiv calendar day; when absent, derive it
+                # from occurred_at (UTC) → Kyiv date here as a safety net. Absent
+                # from set_={...} below, so an upsert never moves it.
+                "attributed_day": (
+                    t.attributed_day
+                    if t.attributed_day is not None
+                    else t.occurred_at.astimezone(_KYIV).date()
+                ),
             }
             for t in items
         ]

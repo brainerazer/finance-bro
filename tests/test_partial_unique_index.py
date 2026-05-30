@@ -33,8 +33,10 @@ async def test_active_duplicate_rejected(session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload) "
-                "VALUES (:a, 'tx1', -100, 'UAH', now(), '{}'::jsonb)"
+                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload, "
+                " attributed_day) "
+                "VALUES (:a, 'tx1', -100, 'UAH', now(), '{}'::jsonb, "
+                " (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )
@@ -67,8 +69,10 @@ async def test_soft_deleted_can_reinsert(session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload) "
-                "VALUES (:a, 'tx-soft', -100, 'UAH', now(), '{}'::jsonb)"
+                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload, "
+                " attributed_day) "
+                "VALUES (:a, 'tx-soft', -100, 'UAH', now(), '{}'::jsonb, "
+                " (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )
@@ -83,8 +87,10 @@ async def test_soft_deleted_can_reinsert(session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload) "
-                "VALUES (:a, 'tx-soft', -100, 'UAH', now(), '{}'::jsonb)"
+                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload, "
+                " attributed_day) "
+                "VALUES (:a, 'tx-soft', -100, 'UAH', now(), '{}'::jsonb, "
+                " (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )

@@ -17,8 +17,10 @@ async def test_is_deleted_default_false(session_factory):
         await s.execute(
             text(
                 "INSERT INTO transactions "
-                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload) "
-                "VALUES (:a, 'sd-1', 0, 'UAH', now(), '{}'::jsonb)"
+                "(account_id, source_tx_id, amount_minor, currency, time, raw_payload, "
+                " attributed_day) "
+                "VALUES (:a, 'sd-1', 0, 'UAH', now(), '{}'::jsonb, "
+                " (now() AT TIME ZONE 'Europe/Kyiv')::date)"
             ),
             {"a": acc_id},
         )

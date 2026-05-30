@@ -8,7 +8,7 @@ quirks are confined to the adapter that produced the raw payload.
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 
 
@@ -39,6 +39,12 @@ class CanonicalTransaction:
     hold: bool = False
     description: str | None = None
     mcc: int | None = None
+    # Kyiv calendar day the transaction is attributed to (D-09). The importer
+    # derives it from `occurred_at` at the source boundary (Plan 03-03). When the
+    # importer leaves it None, `TransactionRepo.insert_many` derives it from
+    # `occurred_at` as a safety net so the NOT NULL column is always populated.
+    # Frozen-on-first-write: absent from the upsert SET clause.
+    attributed_day: date | None = None
 
 
 class ImporterProtocol(Protocol):
