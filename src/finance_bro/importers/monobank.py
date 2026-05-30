@@ -25,6 +25,7 @@ allowlist filtering and D-10 hold-aware upsert have data to work with.
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -39,6 +40,9 @@ from .currency_map import numeric_to_alpha
 from .rate_limit import RateLimitGate
 
 MONO_BASE = "https://api.monobank.ua"
+# D-09: the Kyiv calendar day a transaction is attributed to. Derived from the
+# SAME `time` field as occurred_at, converted UTC -> Europe/Kyiv (DST-aware).
+KYIV = ZoneInfo("Europe/Kyiv")
 
 
 def _retry_after_seconds(resp: httpx.Response) -> int | None:
@@ -124,14 +128,18 @@ class MonobankImporter:
                 raise MonoRateLimitError(_retry_after_seconds(e.response)) from e
             raise MonoTransientError(f"Mono {status}") from e
         for item in resp.json():
+            occurred_at = datetime.fromtimestamp(item["time"], tz=UTC)
             yield CanonicalTransaction(
                 source_tx_id=item["id"],
                 source_account_id=source_account_id,
-                occurred_at=datetime.fromtimestamp(item["time"], tz=UTC),
+                occurred_at=occurred_at,
                 amount_minor=int(item["amount"]),
                 currency=numeric_to_alpha(item["currencyCode"]),
                 raw=item,
                 hold=item.get("hold", False),
                 description=item.get("description"),
                 mcc=item.get("mcc"),
+                # D-09: Kyiv calendar day, frozen on first write (absent from the
+                # upsert SET clause). Derived from the same `time` as occurred_at.
+                attributed_day=occurred_at.astimezone(KYIV).date(),
             )

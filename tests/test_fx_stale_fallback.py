@@ -6,12 +6,27 @@ RED scaffold for a later 03 plan (LATERAL rollup read path not yet built).
 The LEFT JOIN LATERAL must NOT drop the row when no rate exists; instead the
 rollup yields uah_amount_minor=None, fx_rate=None, fx_stale=True.
 """
+
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _truncate_fx(session_factory):
+    """Hermetic isolation: this test asserts NO USD rate exists, so it must not
+    inherit a `fx_rates` row seeded by a sibling FX test (fx_rates is keyed
+    (rate_date, currency) and is NOT in the conftest client-fixture truncate
+    list). Wipe fx_rates/transactions/accounts before the test runs."""
+    async with session_factory() as s:
+        await s.execute(
+            text("TRUNCATE TABLE fx_rates, transactions, accounts RESTART IDENTITY CASCADE")
+        )
+        await s.commit()
+    yield
+
+
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="stale-fallback rollup lands in a later 03 plan", strict=False)
 async def test_no_rate_yields_null_fx_but_row_present(session_factory):
     from finance_bro.db.transaction_repo import TransactionRepo
 
@@ -23,9 +38,7 @@ async def test_no_rate_yields_null_fx_but_row_present(session_factory):
             )
         )
         acc_id = (
-            await s.execute(
-                text("SELECT id FROM accounts WHERE source_account_id='stale-usd'")
-            )
+            await s.execute(text("SELECT id FROM accounts WHERE source_account_id='stale-usd'"))
         ).scalar_one()
         # No fx_rates rows at all for USD.
         await s.execute(
