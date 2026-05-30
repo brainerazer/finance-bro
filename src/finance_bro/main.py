@@ -39,8 +39,10 @@ from fastapi import FastAPI
 from finance_bro.api import (
     routes_accounts,
     routes_backfill,
+    routes_categories,
     routes_health,
     routes_import,
+    routes_rules,
     routes_status,
     routes_transactions,
 )
@@ -141,3 +143,5 @@ app.include_router(routes_transactions.router)
 app.include_router(routes_import.router)
 app.include_router(routes_status.router)
 app.include_router(routes_backfill.router)
+app.include_router(routes_categories.router)
+app.include_router(routes_rules.router)

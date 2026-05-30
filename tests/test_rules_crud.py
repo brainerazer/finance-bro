@@ -12,6 +12,7 @@ itself. Asserts:
 import uuid
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 from finance_bro.categorizer.predicate import RulePredicate
@@ -24,7 +25,14 @@ _BAND_LO = 9200
 _BAND_HI = 9300
 
 
+def _uniq(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
 async def _cleanup(session_factory) -> None:
+    """Pre/post band wipe for this file's private priority range. The autouse
+    `_restore_taxonomy` fixture is the backstop; this keeps a test's own band
+    clean even if it re-runs within a session."""
     async with session_factory() as s, s.begin():
         await s.execute(
             text("DELETE FROM rules WHERE priority >= :lo AND priority < :hi"),
@@ -32,8 +40,19 @@ async def _cleanup(session_factory) -> None:
         )
 
 
-def _uniq(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+@pytest_asyncio.fixture(autouse=True)
+async def _restore_taxonomy(session_factory):
+    """Snapshot the seeded categories/rules baseline (max ids) and delete any
+    rows this test created afterward — the tables are NOT truncated between
+    tests, and absolute-count assertions in test_migration_0004 depend on the
+    seeded counts staying exact. Rules first (FK)."""
+    async with session_factory() as s:
+        max_cat = (await s.execute(text("SELECT max(id) FROM categories"))).scalar_one()
+        max_rule = (await s.execute(text("SELECT max(id) FROM rules"))).scalar_one()
+    yield
+    async with session_factory() as s, s.begin():
+        await s.execute(text("DELETE FROM rules WHERE id > :m"), {"m": max_rule or 0})
+        await s.execute(text("DELETE FROM categories WHERE id > :m"), {"m": max_cat or 0})
 
 
 @pytest.mark.asyncio
@@ -79,9 +98,15 @@ async def test_list_active_ordered_priority_then_id(session_factory):
         # Insert out of order; list must come back priority ASC.
         async with session_factory() as s, s.begin():
             repo = RuleRepo(s)
-            await repo.create(priority=_BAND_LO + 30, category_id=cat.id, predicate_json=pj, description="c")
-            await repo.create(priority=_BAND_LO + 10, category_id=cat.id, predicate_json=pj, description="a")
-            await repo.create(priority=_BAND_LO + 20, category_id=cat.id, predicate_json=pj, description="b")
+            await repo.create(
+                priority=_BAND_LO + 30, category_id=cat.id, predicate_json=pj, description="c"
+            )
+            await repo.create(
+                priority=_BAND_LO + 10, category_id=cat.id, predicate_json=pj, description="a"
+            )
+            await repo.create(
+                priority=_BAND_LO + 20, category_id=cat.id, predicate_json=pj, description="b"
+            )
 
         async with session_factory() as s:
             ordered = await RuleRepo(s).list_active_ordered()
@@ -104,9 +129,15 @@ async def test_reorder_rewrites_priorities_without_unique_collision(session_fact
         pj = {"all": [{"op": "in_int", "field": "mcc", "values": [1]}]}
         async with session_factory() as s, s.begin():
             repo = RuleRepo(s)
-            r1 = await repo.create(priority=_BAND_LO + 11, category_id=cat.id, predicate_json=pj, description="r1")
-            r2 = await repo.create(priority=_BAND_LO + 12, category_id=cat.id, predicate_json=pj, description="r2")
-            r3 = await repo.create(priority=_BAND_LO + 13, category_id=cat.id, predicate_json=pj, description="r3")
+            r1 = await repo.create(
+                priority=_BAND_LO + 11, category_id=cat.id, predicate_json=pj, description="r1"
+            )
+            r2 = await repo.create(
+                priority=_BAND_LO + 12, category_id=cat.id, predicate_json=pj, description="r2"
+            )
+            r3 = await repo.create(
+                priority=_BAND_LO + 13, category_id=cat.id, predicate_json=pj, description="r3"
+            )
         ids = [r1.id, r2.id, r3.id]
 
         # Reverse the order — this is the case that naively triggers a UNIQUE

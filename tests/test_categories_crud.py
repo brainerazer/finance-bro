@@ -10,12 +10,29 @@ reference counts use parameterized text() (T-4-sqli).
 import uuid
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
 
 from finance_bro.db.category_repo import CategoryRepo
 
 
 def _uniq(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _restore_taxonomy(session_factory):
+    """The `categories`/`rules` tables are seeded by migration 0004 and are NOT
+    truncated between tests. Snapshot the seeded baseline (max ids) before the
+    test, then delete any rows this test created afterward so absolute-count
+    assertions elsewhere (test_migration_0004) stay valid. Rules first (FK)."""
+    async with session_factory() as s:
+        max_cat = (await s.execute(text("SELECT max(id) FROM categories"))).scalar_one()
+        max_rule = (await s.execute(text("SELECT max(id) FROM rules"))).scalar_one()
+    yield
+    async with session_factory() as s, s.begin():
+        await s.execute(text("DELETE FROM rules WHERE id > :m"), {"m": max_rule or 0})
+        await s.execute(text("DELETE FROM categories WHERE id > :m"), {"m": max_cat or 0})
 
 
 @pytest.mark.asyncio
@@ -69,9 +86,7 @@ async def test_reference_counts_zero_then_nonzero(session_factory):
     assert (rules_n, tx_n) == (0, 0)
 
     # Reference the category from a rule → rules count becomes 1.
-    predicate_json = {
-        "all": [{"op": "in_int", "field": "mcc", "values": [9999]}]
-    }
+    predicate_json = {"all": [{"op": "in_int", "field": "mcc", "values": [9999]}]}
     async with session_factory() as s, s.begin():
         await RuleRepo(s).create(
             priority=9100,
@@ -89,9 +104,7 @@ async def test_reference_counts_zero_then_nonzero(session_factory):
         async with session_factory() as s, s.begin():
             from sqlalchemy import text
 
-            await s.execute(
-                text("DELETE FROM rules WHERE priority = :p"), {"p": 9100}
-            )
+            await s.execute(text("DELETE FROM rules WHERE priority = :p"), {"p": 9100})
 
 
 @pytest.mark.asyncio
