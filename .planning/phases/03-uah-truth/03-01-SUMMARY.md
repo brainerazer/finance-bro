@@ -52,17 +52,17 @@ Laid the Phase 3 FX schema spine — `fx_rates` (FX-02, keyed `(rate_date, curre
 
 ## What Was Built
 
-**Task 1 — ORM models (`9a8a47e`)**
+**Task 1 — ORM models (`f16dece`)**
 - `FxRate` -> `fx_rates`: composite PK `(rate_date, currency)`, `rate NUMERIC(18,8)`, `fetched_at` default `now()`, covering index `ix_fx_rates_currency_rate_date` on `(currency, rate_date)` (D-04).
 - `TrackedFxCurrency` -> `tracked_fx_currencies`: `currency CHAR(3)` PK, `first_seen_at`, `bootstrap_done` default false, `last_attempted_at`, `last_error` (D-05).
 - `Transaction.attributed_day` flipped `nullable=True` -> `nullable=False`, annotation `Mapped[date | None]` -> `Mapped[date]` (D-09).
 - Added `Numeric`, `PrimaryKeyConstraint`, `Decimal` imports. No `uah_amount_minor` anywhere (FX-03).
 
-**Task 2 — migration 0003 + migration test (`8c47f0c`)**
+**Task 2 — migration 0003 + migration test (`83008cf`)**
 - `alembic/versions/0003_fx_truth.py` (`revision=0003`, `down_revision=0002`): create `fx_rates` + index, create `tracked_fx_currencies`, seed USD/EUR, `UPDATE transactions SET attributed_day = (time AT TIME ZONE 'Europe/Kyiv')::date WHERE attributed_day IS NULL`, then `alter_column(..., nullable=False)`. UPDATE textually precedes ALTER in a single transactional revision (Pitfall 3 / T-03-02). Downgrade reverses in order.
 - `tests/test_attributed_day_migration.py`: downgrades to 0002, inserts a `2026-01-15 23:30 UTC` row (= `2026-01-16 01:30` Kyiv) with NULL `attributed_day`, upgrades to 0003, asserts the day lands on `2026-01-16` (T-03-01 tz-correctness), the column rejects NULL, and the USD/EUR seed is present.
 
-**Task 3 — NBU fixtures + 9 FX scaffolds (`6a0a09b`)**
+**Task 3 — NBU fixtures + 9 FX scaffolds (`367e866`)**
 - `nbu_usd_range.json` (Friday `08.05.2026` + carried-forward Sunday `10.05.2026` with `calcdate=08.05.2026`) and `nbu_empty.json` (`[]`), mirroring the live `exchange_site` shape.
 - 9 RED scaffolds encoding the locked behavior contracts: `test_fx_importer_nbu` (FX-02, Decimal rate, empty->`[]` D-16, mandatory `aclose`), `test_fx_rollup_join` (FX-03 LATERAL stale carry-forward), `test_fx_on_card` (FX-04 account-currency x NBU, Pitfall 2), `test_fx_rollup_math` (banker's rounding + no-double-conversion property), `test_fx_stale_fallback` (D-12 null-FX row still present), `test_fx_bootstrap_lazy` (D-15 CHF lazy track + bootstrap), `test_fx_cron_dst` (D-06 — runs now, **passes**), `test_fx_tick` (D-08/D-16/D-17 — ORDER BY currency, bootstrap re-fetch, empty->last_error, per-currency error isolation, no scheduler_state write), and `test_attributed_day_migration` (authored under Task 2).
 - Scaffolds use in-body imports + `@pytest.mark.xfail(strict=False)` so they collect cleanly while target symbols are unbuilt.
@@ -80,7 +80,11 @@ All run against a real `postgres:17-bookworm` testcontainer where DB-backed:
 
 ## Deviations from Plan
 
-None — plan executed as written. (One process note, not a plan deviation: my initial edits/writes resolved to the shared-checkout path and were rejected/not persisted by the worktree harness; I re-applied every change against the worktree path before committing. No content changed.)
+None — plan executed as written.
+
+Process notes (not plan deviations):
+- My initial edits/writes resolved to the shared-checkout path and were rejected/not persisted by the worktree harness; I re-applied every change against the worktree path before committing. No content changed.
+- Four ruff findings (import sorting in `0003_fx_truth.py` and `test_fx_bootstrap_lazy.py`; an unused `noqa: PT011` in the migration test; ambiguous `×` glyphs in `test_fx_on_card.py` docstrings/comments) were auto/manually fixed in commit `4f… (lint follow-up)` so the acceptance-criteria `ruff check` passes cleanly across every plan file.
 
 ## Known Stubs
 
@@ -93,4 +97,4 @@ No new threat surface beyond the plan's `<threat_model>`. T-03-01 (tz backfill �
 ## Self-Check: PASSED
 
 - All 12 created files + 1 modified file exist on disk and are committed.
-- Commits `9a8a47e`, `8c47f0c`, `6a0a09b` present in `git log`.
+- Commits `f16dece`, `83008cf`, `367e866` present in `git log`.

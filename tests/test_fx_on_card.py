@@ -1,11 +1,11 @@
-"""FX-04 — card transactions in a non-account currency use account-currency ×
+"""FX-04 — card transactions in a non-account currency use account-currency x
 NBU, NEVER triangulation via operationAmount (Pitfall 2 / D-11).
 
 RED scaffold for a later 03 plan.
 
 An account is EUR; a transaction's raw_payload.currencyCode is 840 (USD merchant
 operation). The rollup must label fx_source == "mono_card" and compute
-uah_amount_minor = EUR amount_minor × NBU EUR/UAH rate — i.e. it converts the
+uah_amount_minor = EUR amount_minor x NBU EUR/UAH rate — i.e. it converts the
 ACCOUNT currency (EUR) by the NBU EUR rate, not the USD operation amount.
 """
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -47,7 +47,7 @@ async def test_card_foreign_op_uses_account_currency_nbu(session_factory):
             )
         )
         # currencyCode 840 (USD) != account currency EUR -> mono_card label,
-        # but the math uses the EUR account amount × NBU EUR rate.
+        # but the math uses the EUR account amount x NBU EUR rate.
         await s.execute(
             text(
                 "INSERT INTO transactions "

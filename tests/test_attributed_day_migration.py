@@ -79,7 +79,7 @@ async def test_attributed_day_backfilled_kyiv_correct(pg_url, engine):
     assert nullable == "NO", "attributed_day must be NOT NULL after 0003"
 
     # The column now rejects NULL inserts.
-    with pytest.raises(Exception):  # noqa: B017, PT011 — IntegrityError surface
+    with pytest.raises(Exception):  # noqa: B017 — IntegrityError surface
         async with engine.begin() as conn:
             acc_id2 = (
                 await conn.execute(

@@ -18,8 +18,9 @@ from sqlalchemy import text
 @pytest.mark.asyncio
 @pytest.mark.xfail(reason="fx_bootstrap service lands in a later 03 plan", strict=False)
 async def test_chf_tracked_and_bootstrapped(session_factory):
-    from finance_bro.importers.base import FxRateRow
     from finance_bro.services.fx_bootstrap import FxBootstrapService
+
+    from finance_bro.importers.base import FxRateRow
 
     async with session_factory() as s:
         await s.execute(
