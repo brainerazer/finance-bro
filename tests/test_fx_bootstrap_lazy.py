@@ -1,7 +1,7 @@
 """D-15 — a never-seen currency is lazily tracked on first sighting, and a
 bootstrap fetch backfills its range so a subsequent read resolves a rate.
 
-RED scaffold for a later 03 plan (fx_bootstrap service not yet built).
+Live test (Plan 03-04): FxBootstrapService is built.
 
 Insert a CHF transaction -> a tracked_fx_currencies CHF row appears; the
 (mocked) bootstrap fetches the CHF range, upserts fx_rates, and a re-read
@@ -16,7 +16,6 @@ from sqlalchemy import text
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="fx_bootstrap service lands in a later 03 plan", strict=False)
 async def test_chf_tracked_and_bootstrapped(session_factory):
     from finance_bro.services.fx_bootstrap import FxBootstrapService
 
