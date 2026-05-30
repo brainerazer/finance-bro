@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from finance_bro.categorizer.predicate import RulePredicate
+
 
 class HealthOut(BaseModel):
     status: str
@@ -58,6 +60,12 @@ class TransactionOut(BaseModel):
     fx_rate_date: date | None = None
     fx_source: Literal["native_uah", "mono_card", "nbu"]
     fx_stale: bool
+    # Phase 4 (CAT-02/CAT-03/D-02) — the row's resolved category. All NULL for an
+    # uncategorized transaction (LEFT JOIN categories; category_id may be NULL).
+    category_id: int | None = None
+    category_source: str | None = None
+    category_name: str | None = None
+    category_color: str | None = None
 
 
 class ImportResultOut(BaseModel):
@@ -128,3 +136,60 @@ class BackfillEnqueueIn(BaseModel):
 
 class BackfillEnqueueOut(BaseModel):
     run_ids: list[int]
+
+
+# ----- Phase 4 (CAT-03) — Category CRUD DTOs -----
+
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    color: str | None = None
+
+
+class CategoryCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    color: str | None = Field(default=None, max_length=32)
+
+
+class CategoryUpdateIn(BaseModel):
+    # Both optional — a PATCH may change only one field. At least one must be set
+    # for the update to be meaningful, but an all-None body is a harmless no-op.
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    color: str | None = Field(default=None, max_length=32)
+
+
+# ----- Phase 4 (CAT-01/CAT-02) — Rule CRUD DTOs -----
+
+
+class RuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    priority: int
+    category_id: int
+    # The stored predicate JSON, re-validated into the AST on the way out so a
+    # malformed-at-rest predicate can never leak past the API boundary.
+    predicate: RulePredicate
+    description: str | None = None
+
+
+class RuleCreateIn(BaseModel):
+    priority: int = Field(ge=1)
+    category_id: int
+    # Pydantic decodes + validates the discriminated-union predicate at request
+    # parse (V5 / T-4-validate); an unknown `op` or malformed shape → 422 before
+    # the interpreter ever runs.
+    predicate: RulePredicate
+    description: str | None = Field(default=None, max_length=200)
+
+
+class RuleUpdateIn(BaseModel):
+    priority: int | None = Field(default=None, ge=1)
+    category_id: int | None = None
+    predicate: RulePredicate | None = None
+    description: str | None = Field(default=None, max_length=200)
+
+
+class RuleReorderIn(BaseModel):
+    ordered_ids: list[int] = Field(min_length=1)
