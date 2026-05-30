@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 03
-current_plan: 3
+current_plan: 4
 status: executing
-last_updated: "2026-05-30T17:40:00.000Z"
+last_updated: "2026-05-30T17:50:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
-  percent: 33
+  completed_plans: 11
+  percent: 36
 ---
 
 # State: finance-bro
@@ -32,12 +32,12 @@ progress:
 ## Current Position
 
 Phase: 03 (uah-truth) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 
 - **Current phase:** 03
-- **Current plan:** 1
+- **Current plan:** 4
 - **Status:** Executing Phase 03
-- **Progress:** Phase 0/7 complete
+- **Progress:** Phase 2/7 complete
 
 ```
 [x] [x] [~] [ ] [ ] [ ] [ ]
@@ -93,11 +93,11 @@ None.
 
 ### Last Action
 
-Executed Plan 03-02 (FX ingestion slice): added `FxRatesPort`/`FxRateRow` + `NbuFxImporter` (single-call NBU range fetch, Decimal rates, empty→[]), extended `currency_map` (PLN/GBP/CHF), and built `FxRateRepo` (idempotent upsert + count) + `TrackedFxCurrencyRepo` (ordered iterate/first-seen upsert/bootstrap flag/last-error). NbuFxImporter scaffolds flipped xfail→live PASS; added `test_fx_repos.py` for live repo coverage. Full suite: 70 passed, 4 xfailed (Plan 03/04 scaffolds), 1 skipped, 0 failed. Commits 35c5c43, 2e9a4d2.
+Executed Plan 03-03 (UAH rollup read path): new `services/fx_rollup.rollup()` (Decimal banker's-rounding UAH math, native_uah/mono_card/nbu labels, fx_stale, Decimal-as-string fx_rate — D-11..D-14, no double-conversion FX-04); rewrote `TransactionRepo.list_for_account` to the D-14 `LEFT JOIN LATERAL` carry-forward read returning enriched mapping rows (FX-03, computed on read); `MonobankImporter` now sets `attributed_day = time→Europe/Kyiv date` (D-09, frozen on upsert); added 5 FX fields to `TransactionOut` + route wiring. Flipped 4 plan-owned scaffolds (test_fx_rollup_math/join/on_card/stale_fallback) xfail→live PASS. Fixed a cross-test fx_rates contamination (Rule 1) with hermetic autouse truncate; added `.gitignore` for `__pycache__`. Full suite: 106 passed, 4 xfailed (Plan-04 scaffolds), 0 failed. Commits 49f96d2, 1c20e84, 1bb9a86.
 
 ### Next Action
 
-Execute Plan 03-03 (UAH rollup read-path: LATERAL carry-forward join, fx_on_card multi-currency convert, banker's-rounding rollup math — flips test_fx_rollup_join / test_fx_on_card). Plan 03-04 then wires the cron/bootstrap lifecycle (flips test_fx_bootstrap_lazy / test_fx_stale_fallback / test_fx_tick).
+Execute Plan 03-04 (FX cron/bootstrap lifecycle): wire `NbuFxImporter` + both repos into the scheduler — daily NBU fetch + lazy bootstrap on first-seen currency. Flips the remaining xfail scaffolds: test_fx_bootstrap_lazy, test_fx_tick (×3).
 
 ### Recovery
 
