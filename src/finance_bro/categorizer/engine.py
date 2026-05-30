@@ -14,6 +14,7 @@ sweep (Plan 04): it skips SKIP rows from its output entirely.
 This module is pure — no DB, no I/O.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -49,9 +50,12 @@ class CompiledRule:
     predicate: RulePredicate
 
 
-class _RuleRow(Protocol):
-    """Structural shape of a stored rule (the ORM `Rule` satisfies it) — kept as
-    a Protocol so this module stays pure (no SQLAlchemy import)."""
+class RuleRowLike(Protocol):
+    """Structural shape of a stored rule (the ORM `Rule` satisfies it at runtime)
+    — kept as a Protocol so this module stays pure (no SQLAlchemy import). The
+    ORM exposes these as `Mapped[...]` descriptors (which yield `int`/`dict` on
+    instance access), so callers passing ORM rows `cast(...)` at the boundary —
+    the runtime values are exactly these plain types."""
 
     priority: int
     id: int
@@ -59,7 +63,7 @@ class _RuleRow(Protocol):
     predicate: dict[str, Any]
 
 
-def compile_rules(rules: list[_RuleRow]) -> list[CompiledRule]:
+def compile_rules(rules: Sequence[RuleRowLike]) -> list[CompiledRule]:
     """Adapt stored rules (priority-ordered ORM rows with a JSON-dict predicate)
     into `CompiledRule`s the engine evaluates. The predicate JSON is validated
     into the closed-op AST here — the ONE place the at-rest JSON becomes a

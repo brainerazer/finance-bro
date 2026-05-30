@@ -21,12 +21,26 @@ account keeps this file isolated; the seeded taxonomy stays intact.
 import uuid
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 from finance_bro.categorizer import categorize_rows
 from finance_bro.categorizer.engine import compile_rules
 from finance_bro.db.rule_repo import RuleRepo
 from finance_bro.db.transaction_repo import TransactionRepo
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_accounts(session_factory):
+    """Wipe accounts+transactions before AND after each test so this file's
+    rows never leak into sibling session_factory tests (only the `client`
+    fixture truncates). Seeded categories/rules survive (not truncated)."""
+    truncate = text("TRUNCATE TABLE transactions, accounts RESTART IDENTITY CASCADE")
+    async with session_factory() as s, s.begin():
+        await s.execute(truncate)
+    yield
+    async with session_factory() as s, s.begin():
+        await s.execute(truncate)
 
 
 async def _make_account(session_factory) -> int:
