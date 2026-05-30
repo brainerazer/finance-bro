@@ -21,9 +21,9 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Multi-Currency
 
 - [ ] **FX-01**: Store transaction amount in original currency (UAH/USD/EUR distinct, signed minor units `BIGINT` + ISO-4217 alpha currency)
-- [ ] **FX-02**: NBU FX rates fetched daily (16:00 Kyiv); 12-month historical backfill on first run; weekend/holiday fallback uses most-recent prior business-day rate
-- [ ] **FX-03**: UAH rollup computed on read via NBU rate at transaction-day; never denormalized into a stored column
-- [ ] **FX-04**: For FX-on-card transactions, use Mono's account-currency `amount` directly; do not double-convert via NBU
+- [x] **FX-02**: NBU FX rates fetched daily (16:00 Kyiv); 12-month historical backfill on first run; weekend/holiday fallback uses most-recent prior business-day rate
+- [x] **FX-03**: UAH rollup computed on read via NBU rate at transaction-day; never denormalized into a stored column
+- [x] **FX-04**: For FX-on-card transactions, use Mono's account-currency `amount` directly; do not double-convert via NBU
 
 ### Categorization
 
@@ -131,9 +131,9 @@ Each v1 requirement maps to exactly one roadmap phase. See ROADMAP.md for phase 
 | ING-07 | Phase 1 | Pending |
 | ING-08 | Phase 2 | Pending |
 | FX-01 | Phase 1 | Pending |
-| FX-02 | Phase 3 | Pending |
-| FX-03 | Phase 3 | Pending |
-| FX-04 | Phase 3 | Pending |
+| FX-02 | Phase 3 | Complete |
+| FX-03 | Phase 3 | Complete |
+| FX-04 | Phase 3 | Complete |
 | CAT-01 | Phase 4 | Pending |
 | CAT-02 | Phase 4 | Pending |
 | CAT-03 | Phase 4 | Pending |
