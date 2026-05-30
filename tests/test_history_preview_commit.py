@@ -278,3 +278,54 @@ async def test_locked_row_never_in_changes_and_unchanged_after_commit(session_fa
     await svc.commit(acc_id, preview.token)
     state = await _tx_state(session_factory, acc_id)
     assert state["d-locked"] == (transport, "manual", True)
+
+
+# ----- Route-level coverage (Task 2) — via the `client` ASGI fixture -----
+#
+# The `client` fixture truncates accounts/transactions before AND after the test
+# (RESTART IDENTITY), so the account seeded here is the FIRST (and only) card the
+# `/api/rules/run/*` endpoints sweep (D-04). The seeded mixed account exercises
+# the full diff + the locked-row invariant end-to-end.
+
+
+@pytest.mark.asyncio
+async def test_route_preview_then_commit_and_stale_409(client, session_factory):
+    acc_id, groceries, transport = await _seed_mixed_account(session_factory)
+
+    # (1) preview returns 200 with the documented body.
+    pre = await client.post("/api/rules/run/preview")
+    assert pre.status_code == 200
+    body = pre.json()
+    assert set(body) >= {
+        "changed_count",
+        "overwritten_count",
+        "skipped_locked_count",
+        "changes",
+        "token",
+    }
+    assert body["changed_count"] == 2
+    assert body["overwritten_count"] == 1
+    assert body["skipped_locked_count"] == 1
+    assert body["token"]
+    for ch in body["changes"]:
+        assert set(ch) == {"transaction_id", "old_category_id", "new_category_id"}
+
+    # (2) commit with a STALE/garbage token -> 409, nothing changes.
+    before = await _tx_state(session_factory, acc_id)
+    stale = await client.post("/api/rules/run/commit", json={"token": "deadbeef-not-a-real-token"})
+    assert stale.status_code == 409
+    assert await _tx_state(session_factory, acc_id) == before
+
+    # (3) commit with the matching token -> 200, applies the diff.
+    ok = await client.post("/api/rules/run/commit", json={"token": body["token"]})
+    assert ok.status_code == 200
+    assert ok.json()["applied"] == 2
+
+    state = await _tx_state(session_factory, acc_id)
+    assert state["a-null-grocery"][0] == groceries
+    assert state["a-null-grocery"][1] == "rule"
+    assert state["b-wrong-rule"][0] == groceries
+    assert state["b-wrong-rule"][1] == "rule"
+    assert state["c-no-match"][0] is None
+    # Locked row untouched end-to-end (CAT-04).
+    assert state["d-locked"] == (transport, "manual", True)

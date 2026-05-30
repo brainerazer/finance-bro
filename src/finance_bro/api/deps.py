@@ -27,6 +27,7 @@ from finance_bro.importers.monobank import MonobankImporter
 from finance_bro.importers.rate_limit import RateLimitGate
 from finance_bro.scheduler.runner import SchedulerRunner
 from finance_bro.services.import_service import ImportService
+from finance_bro.services.rules_history import RulesHistoryService
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -52,6 +53,12 @@ def get_import_service(
     return ImportService(get_session_factory(), importer)
 
 
+def get_rules_history_service() -> RulesHistoryService:
+    """CAT-05 run-rules-over-history service over the process-wide session
+    factory (mirrors get_import_service)."""
+    return RulesHistoryService(get_session_factory())
+
+
 def get_scheduler_runner(request: Request) -> SchedulerRunner:
     """Return the process-scoped SchedulerRunner attached at lifespan startup
     (RESEARCH.md Pattern 1 / Code Examples §2). Used by Plan 02-04's
@@ -61,7 +68,5 @@ def get_scheduler_runner(request: Request) -> SchedulerRunner:
     itself is an implementation detail (PATTERNS.md anti-pattern callout)."""
     runner = getattr(request.app.state, "runner", None)
     if runner is None:
-        raise RuntimeError(
-            "SchedulerRunner missing from app.state — did lifespan fire?"
-        )
+        raise RuntimeError("SchedulerRunner missing from app.state — did lifespan fire?")
     return runner
