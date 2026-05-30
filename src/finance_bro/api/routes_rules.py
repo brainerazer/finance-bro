@@ -17,14 +17,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from finance_bro.api.deps import get_session
+from finance_bro.api.deps import get_rules_history_service, get_session
 from finance_bro.api.schemas import (
     RuleCreateIn,
     RuleOut,
     RuleReorderIn,
     RuleUpdateIn,
+    RunCommitIn,
+    RunCommitOut,
+    RunPreviewOut,
 )
+from finance_bro.db.account_repo import AccountRepo
 from finance_bro.db.rule_repo import RuleRepo
+from finance_bro.services.rules_history import RulesHistoryService, StaleRunError
 
 router = APIRouter()
 
@@ -100,3 +105,45 @@ async def delete_rule(
         raise HTTPException(status_code=404, detail="rule not found")
     await repo.delete(rid)
     await session.commit()
+
+
+# ----- CAT-05: run-rules-over-history preview/commit -----
+#
+# Account selection mirrors routes_transactions (D-04 single-card v1 model): the
+# sweep targets the FIRST card. No card yet (no import has run) -> 404 so the UI
+# can distinguish "nothing to sweep" from an empty diff. These paths
+# (/api/rules/run/*) are TWO segments deep, so they never collide with the
+# single-segment `/api/rules/{rid}` path param.
+
+
+@router.post("/api/rules/run/preview", response_model=RunPreviewOut)
+async def preview_run(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    service: Annotated[RulesHistoryService, Depends(get_rules_history_service)],
+) -> RunPreviewOut:
+    card = await AccountRepo(session).get_first_card()
+    if card is None:
+        raise HTTPException(status_code=404, detail="no card account to categorize")
+    return await service.preview(card.id)
+
+
+@router.post("/api/rules/run/commit", response_model=RunCommitOut)
+async def commit_run(
+    body: RunCommitIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    service: Annotated[RulesHistoryService, Depends(get_rules_history_service)],
+) -> RunCommitOut:
+    card = await AccountRepo(session).get_first_card()
+    if card is None:
+        raise HTTPException(status_code=404, detail="no card account to categorize")
+    try:
+        result = await service.commit(card.id, body.token)
+    except StaleRunError as e:
+        # D-13: the rules or the data changed since the preview was issued — the
+        # submitted token no longer matches the recomputed one. Nothing was
+        # written; the caller must re-preview and resubmit.
+        raise HTTPException(
+            status_code=409,
+            detail={"detail": "stale", "message": "Rules or data changed; re-preview."},
+        ) from e
+    return RunCommitOut(applied=result["applied"])

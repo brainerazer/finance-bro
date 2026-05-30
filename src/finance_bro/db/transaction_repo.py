@@ -185,6 +185,66 @@ class TransactionRepo:
             )
         return rows
 
+    # D-14 / Pitfall 1: the account-wide counterpart to fetch_for_categorize — the
+    # history sweep reads the WHOLE account's non-locked, non-deleted rows (drops
+    # the `source_tx_id = ANY(...)` touched filter; KEEPS `NOT is_user_locked` so a
+    # locked row never reaches the engine). Same column set + RowView build as the
+    # touched read; bound params only (T-4-sqli).
+    _FETCH_ALL_FOR_CATEGORIZE_SQL = text(
+        """
+        SELECT id, account_id, amount_minor, currency, hold, mcc, description,
+               category_id, is_user_locked, raw_payload
+        FROM transactions
+        WHERE account_id = :account_id
+          AND NOT is_user_locked
+          AND NOT is_deleted
+        """
+    )
+
+    # Count of locked (non-deleted) rows in the account — the history sweep's
+    # `skipped_locked_count` (D-12). Locked rows are excluded from the sweep by
+    # _FETCH_ALL_FOR_CATEGORIZE_SQL; this counts how many were left untouched.
+    _COUNT_LOCKED_SQL = text(
+        """
+        SELECT count(*) FROM transactions
+        WHERE account_id = :account_id
+          AND is_user_locked
+          AND NOT is_deleted
+        """
+    )
+
+    async def fetch_all_for_categorize(self, account_id: int) -> list[RowView]:
+        """Load EVERY non-locked, non-deleted row in the account as pure
+        `RowView`s for the history sweep (D-14). The account-wide counterpart to
+        `fetch_for_categorize`: locked rows are excluded in SQL (D-09 / Pitfall 1).
+        Reuses the identical RowView construction + raw_payload `.get()` safety."""
+        result = await self._s.execute(
+            self._FETCH_ALL_FOR_CATEGORIZE_SQL, {"account_id": account_id}
+        )
+        rows: list[RowView] = []
+        for m in result.mappings().all():
+            raw: dict[str, Any] = m["raw_payload"] or {}
+            rows.append(
+                RowView(
+                    id=m["id"],
+                    amount_minor=m["amount_minor"],
+                    hold=m["hold"],
+                    is_user_locked=m["is_user_locked"],
+                    category_id=m["category_id"],
+                    description=m["description"],
+                    mcc=m["mcc"],
+                    account_id=m["account_id"],
+                    currency=m["currency"],
+                    raw_payload=raw,
+                )
+            )
+        return rows
+
+    async def count_locked(self, account_id: int) -> int:
+        """How many locked (non-deleted) rows the history sweep skips (D-12)."""
+        result = await self._s.execute(self._COUNT_LOCKED_SQL, {"account_id": account_id})
+        return int(result.scalar_one())
+
     # Targeted, parameterized write-back. NEVER references is_user_locked in the
     # SET clause — locked rows are excluded upstream by fetch_for_categorize and
     # by the engine's SKIP. A (id, None) update writes category_id NULL with
