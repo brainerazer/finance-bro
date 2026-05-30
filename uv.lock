@@ -211,6 +211,7 @@ dependencies = [
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
     { name = "tenacity" },
+    { name = "tzdata" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -242,6 +243,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.49" },
     { name = "structlog", specifier = "==25.5.0" },
     { name = "tenacity", specifier = "==9.1.4" },
+    { name = "tzdata", specifier = "==2026.2" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.46.0" },
 ]
 
