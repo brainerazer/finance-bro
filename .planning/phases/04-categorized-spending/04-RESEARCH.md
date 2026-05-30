@@ -534,7 +534,7 @@ async with self._session_factory() as session, session.begin():
 
 **Note:** Every `[ASSUMED]` item here falls inside an explicit "Claude's Discretion" area of CONTEXT.md, so none require user confirmation before planning — they are design choices the planner is empowered to lock.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `priority` be UNIQUE (forbidding ties) or just indexed?**
    - What we know: deterministic ordering needs `(priority, id)` tiebreak regardless.
