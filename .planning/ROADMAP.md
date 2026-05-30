@@ -89,9 +89,9 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
   3. `GET /api/transactions` for a USD-currency transaction returns a UAH-equivalent computed on read by joining `transactions × fx_rates` on `(currency, attributed_day)`; no `uah_amount_minor` is denormalized in the schema.
   4. For a Mono FX-on-card transaction (e.g., EUR card paying at a USD merchant), the UAH rollup uses Mono's `amount` field (account currency, already settled) × NBU rate — not a re-conversion via the operation-currency leg.
   5. A Sunday-dated transaction's UAH rollup uses Friday's NBU rate; the API response makes the rate date and source visible.
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 - [x] 03-01-PLAN.md — schema spine: fx_rates + tracked_fx_currencies migration, attributed_day backfill+NOT NULL, Wave 0 FX test scaffolds + NBU fixtures
-- [ ] 03-02-PLAN.md — NBU importer slice: FxRatesPort + NbuFxImporter (exchange_site), FxRateRepo + TrackedFxCurrencyRepo, currency_map long tail
+- [x] 03-02-PLAN.md — NBU importer slice: FxRatesPort + NbuFxImporter (exchange_site), FxRateRepo + TrackedFxCurrencyRepo, currency_map long tail
 - [ ] 03-03-PLAN.md — rollup read slice: fx_rollup math, LATERAL-join read + frozen attributed_day upsert, importer attributed_day, 5 TransactionOut FX fields + route
 - [ ] 03-04-PLAN.md — FX lifecycle slice: fx_bootstrap service, fx_tick cron (16:00 Kyiv), lifespan wiring + NBU client aclose + tzdata guard
 **UI hint:** no
@@ -180,7 +180,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 |-------|----------------|--------|-----------|
 | 1. First Real Transaction | 0/4 | Planned | - |
 | 2. Reliable Sync | 0/? | Not started | - |
-| 3. UAH Truth | 1/4 | In Progress|  |
+| 3. UAH Truth | 2/4 | In Progress|  |
 | 4. Categorized Spending | 0/? | Not started | - |
 | 5. Honest Totals | 0/? | Not started | - |
 | 6. This Month UI | 0/? | Not started | - |

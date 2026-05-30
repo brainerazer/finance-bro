@@ -51,13 +51,13 @@ Delivered the FX-02 outbound-HTTP + persistence half: an `NbuFxImporter` behind 
 
 ## What Was Built
 
-**Task 1 — FxRatesPort/FxRateRow + NbuFxImporter + currency_map long tail (`35c5c43`)**
+**Task 1 — FxRatesPort/FxRateRow + NbuFxImporter + currency_map long tail (`ab6b74b`)**
 - `importers/base.py`: added `FxRateRow` (`@dataclass(frozen=True)`: `rate_date: date`, `currency: str`, `rate: Decimal`) and `class FxRatesPort(Protocol)` with the single async `fetch_range(currency, start, end) -> list[FxRateRow]` (D-02). Added `from decimal import Decimal`.
 - `importers/nbu.py`: `NbuFxImporter` mirroring `MonobankImporter` but with NO `X-Token` header and NO `RateLimitGate` (NBU has no token). Constant `NBU_BASE = "https://bank.gov.ua/NBU_Exchange/exchange_site"` (hardcoded — SSRF mitigation T-03-06). `fetch_range` decorated with tenacity `@retry(stop_after_attempt(3), wait_exponential(multiplier=2, max=30), retry_if_exception_type((TransportError, HTTPStatusError)), reraise=True)` (T-03-05). GET with `start`/`end` (`%Y%m%d`), `valcode`, `json` params; `raise_for_status()`; `raw = json.loads(resp.text, parse_float=Decimal)` (NEVER `resp.json()` — Pitfall 1 / T-03-04); rows parse `exchangedate` via `%d.%m.%Y`, use `cc` for currency, and `rate_per_unit` defensively when `units != 1` (A3). `raw == []` → `[]` (D-16). `aclose()` closes the client.
 - `importers/currency_map.py`: extended `_NUM_TO_ALPHA` with `985:"PLN"`, `826:"GBP"`, `756:"CHF"` (D-15); raise-on-unknown behavior of `numeric_to_alpha` left intact (Mono insert path depends on it).
 - `tests/test_fx_importer_nbu.py`: removed the two Wave-0 `xfail` marks (and refreshed docstring) so the importer tests assert as live PASS.
 
-**Task 2 — FxRateRepo + TrackedFxCurrencyRepo + live repo tests (`2e9a4d2`)**
+**Task 2 — FxRateRepo + TrackedFxCurrencyRepo + live repo tests (`9815a18`)**
 - `db/fx_rate_repo.py`: `upsert_many(rows)` builds value dicts and runs `insert(FxRate).values(...).on_conflict_do_nothing(index_elements=["rate_date","currency"])` (D-03), returning `rowcount`; `count_in_window(currency, since_date)` uses `text()` count with `int(row[0]) if row else 0`.
 - `db/tracked_fx_currency_repo.py`: `list_currencies` (ordered `select().order_by(currency)` → scalars, D-17), `get`, `upsert_currency` (ON CONFLICT DO NOTHING first-seen, D-15), `set_bootstrap_done` (text UPDATE), `mark_attempted(currency, last_error)` (text UPDATE of `last_attempted_at=now()` + `last_error` only — never `scheduler_state`, D-08).
 - `tests/test_fx_repos.py` (NEW): live coverage against a real Postgres container — idempotent double-upsert produces no duplicates (`count == 2`), `count_in_window` window-bounded, empty upsert is a no-op, `list_currencies` ascending (D-17), `set_bootstrap_done` flips true, `mark_attempted` sets then clears `last_error`.
@@ -67,7 +67,7 @@ Delivered the FX-02 outbound-HTTP + persistence half: an `NbuFxImporter` behind 
 Run against a real `postgres:17-bookworm` testcontainer where DB-backed.
 - `uv run pytest tests/test_fx_importer_nbu.py tests/test_importer_currency_map.py` — **4 passed** (NBU range parses dates + Decimal rates; empty body → `[]`; `aclose()` leaves no unclosed-client warning under `filterwarnings=["error"]`; PLN/GBP/CHF mappings).
 - `uv run pytest tests/test_fx_repos.py` — **3 passed** (idempotent re-upsert no-dupe/no-error; `count_in_window` bounded; `list_currencies` ascending; `set_bootstrap_done`→true; `mark_attempted` records then clears `last_error`).
-- `uv run pytest tests/` (full suite) — **70 passed, 4 xfailed, 1 skipped, 0 failed**. The 4 remaining xfails are the Plan 03/04 scaffolds (`test_fx_bootstrap_lazy`, `test_fx_on_card`, `test_fx_rollup_join`, `test_fx_stale_fallback`) — none owned by this plan; **0 XPASS leaks** (confirmed via `-rxX`).
+- `uv run pytest tests/` (full suite) — **102 passed, 9 xfailed, 0 failed**. The 9 remaining xfails are all Plan 03/04 scaffolds (`test_fx_bootstrap_lazy`, `test_fx_on_card`, `test_fx_rollup_join`, `test_fx_rollup_math` ×2, `test_fx_stale_fallback`, `test_fx_tick` ×3) — none owned by this plan; **0 XPASS leaks** (confirmed via `-rxX`).
 - Grep gates: `parse_float=Decimal` present; `resp.json()` = 0; `X-Token` = 0; `RateLimitGate` = 0 (nbu.py); `on_conflict_do_nothing` = 1 (fx_rate_repo.py); `scheduler_state` = 0 (tracked_fx_currency_repo.py).
 - Imports: `from finance_bro.importers.base import FxRatesPort, FxRateRow`; `from finance_bro.db.fx_rate_repo import FxRateRepo`; `from finance_bro.db.tracked_fx_currency_repo import TrackedFxCurrencyRepo` — all clean.
 - `uv run ruff check` + `ruff format --check` — PASS across all 7 touched source/test files.
@@ -80,7 +80,7 @@ Run against a real `postgres:17-bookworm` testcontainer where DB-backed.
 - **Issue:** The plan's Task 2 `<verify>` runs `tests/test_fx_bootstrap_lazy.py` and `tests/test_fx_stale_fallback.py` and the acceptance criteria imply they should pass with these repos. They do **not**: `test_fx_bootstrap_lazy` imports `FxBootstrapService` from `finance_bro.services.fx_bootstrap` (built in **Plan 04**), and `test_fx_stale_fallback` imports `TransactionRepo.list_for_account` returning rollup mappings (the LATERAL join built in **Plan 03**). Un-xfailing either would turn the suite red (ImportError / missing method), since neither symbol exists yet. (The planner appears to have mis-assigned these scaffolds to Task 2's verify block.)
 - **Fix:** Left both scaffolds xfail (they will flip in their owning plans). Added `tests/test_fx_repos.py` as live PASS coverage that exercises **only** the two repos this plan owns — idempotent upsert, `count_in_window`, ordered `list_currencies`, `set_bootstrap_done`, and `mark_attempted` set/clear. This satisfies the real acceptance intent ("FxRateRepo upserts idempotently"; "list_currencies ascending") without breaking the suite.
 - **Files modified:** `tests/test_fx_repos.py` (new).
-- **Commit:** `2e9a4d2`.
+- **Commit:** `9815a18`.
 
 ### 2. [Rule 3 — Blocking] Removed stale Wave-0 `xfail` marks on the NbuFxImporter scaffolds
 
@@ -88,7 +88,7 @@ Run against a real `postgres:17-bookworm` testcontainer where DB-backed.
 - **Issue:** `test_fx_importer_nbu.py`'s two tests carried `@pytest.mark.xfail(strict=False)`. Once `NbuFxImporter` was implemented they began to XPASS; with `strict=False` an XPASS is silent and a stale xfail mark swallows future regressions, failing the plan's success criterion "the NbuFxImporter/FxRateRow scaffolds now pass."
 - **Fix:** Removed the `xfail` decorators (and refreshed the docstring) so they assert as live PASS — the explicit Wave-0 intent recorded in 03-01-SUMMARY.
 - **Files modified:** `tests/test_fx_importer_nbu.py`.
-- **Commit:** `35c5c43`.
+- **Commit:** `ab6b74b`.
 
 ### 3. [Style] `ruff format` applied to new files
 
@@ -105,5 +105,5 @@ No new threat surface beyond the plan's `<threat_model>`. T-03-04 (Decimal parse
 ## Self-Check: PASSED
 
 - All 4 created + 3 modified files exist on disk and are committed.
-- Commits `35c5c43` and `2e9a4d2` present in `git log`.
+- Commits `ab6b74b` (Task 1) and `9815a18` (Task 2) present in `git log`.
 - HEAD on `main`; no untracked/uncommitted code files left behind.
