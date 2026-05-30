@@ -1,0 +1,54 @@
+[
+  {
+    "exchangedate": "08.05.2026",
+    "r030": 840,
+    "cc": "USD",
+    "txt": "Долар США",
+    "enname": "US Dollar",
+    "rate": 43.8033,
+    "units": 1,
+    "rate_per_unit": 43.8033,
+    "group": "1",
+    "calcdate": "08.05.2026",
+    "special": "0"
+  },
+  {
+    "exchangedate": "09.05.2026",
+    "r030": 840,
+    "cc": "USD",
+    "txt": "Долар США",
+    "enname": "US Dollar",
+    "rate": 43.8033,
+    "units": 1,
+    "rate_per_unit": 43.8033,
+    "group": "1",
+    "calcdate": "08.05.2026",
+    "special": "0"
+  },
+  {
+    "exchangedate": "10.05.2026",
+    "r030": 840,
+    "cc": "USD",
+    "txt": "Долар США",
+    "enname": "US Dollar",
+    "rate": 43.8033,
+    "units": 1,
+    "rate_per_unit": 43.8033,
+    "group": "1",
+    "calcdate": "08.05.2026",
+    "special": "0"
+  },
+  {
+    "exchangedate": "11.05.2026",
+    "r030": 840,
+    "cc": "USD",
+    "txt": "Долар США",
+    "enname": "US Dollar",
+    "rate": 43.9120,
+    "units": 1,
+    "rate_per_unit": 43.9120,
+    "group": "1",
+    "calcdate": "11.05.2026",
+    "special": "0"
+  }
+]

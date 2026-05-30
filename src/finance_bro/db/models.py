@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -10,6 +11,8 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
+    PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
     text,
@@ -64,7 +67,7 @@ class Transaction(Base):
     )
     mcc: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    attributed_day: Mapped[date | None] = mapped_column(Date, nullable=True)
+    attributed_day: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -128,3 +131,49 @@ class SchedulerState(Base):
     since: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
+
+
+class FxRate(Base):
+    """NBU daily FX rate, keyed (rate_date, currency) — FX-02 / D-04.
+
+    Rates are computed on read via a LATERAL join (FX-03); this table is the
+    sole source of truth and is NEVER denormalized into transactions.
+    """
+
+    __tablename__ = "fx_rates"
+
+    rate_date: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(CHAR(3), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("rate_date", "currency"),
+        # D-04 covering index for the DESC LATERAL lookup (leading column
+        # currency, then rate_date — Postgres scans backward for the DESC limit).
+        Index("ix_fx_rates_currency_rate_date", "currency", "rate_date"),
+    )
+
+
+class TrackedFxCurrency(Base):
+    """Currencies whose NBU rates we fetch — D-05.
+
+    Seeded with USD/EUR; new currencies are lazily inserted on first sighting
+    (D-15). `bootstrap_done` flips true only after the 12-month backfill lands.
+    """
+
+    __tablename__ = "tracked_fx_currencies"
+
+    currency: Mapped[str] = mapped_column(CHAR(3), primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    bootstrap_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    last_attempted_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
