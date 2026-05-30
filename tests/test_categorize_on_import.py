@@ -68,7 +68,7 @@ async def test_fetch_for_categorize_excludes_locked_rows(session_factory):
                 "VALUES "
                 "  (:a, 'g-debit',  -1500, 'UAH', now(), '{}'::jsonb, false, 5411, 'ATB', false, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date), "
-                "  (:a, 'no-match', -2000, 'UAH', now(), '{}'::jsonb, false, 4111, 'Bolt', false, "
+                "  (:a, 'no-match', -2000, 'UAH', now(), '{}'::jsonb, false, 9999, 'Bolt', false, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date), "
                 "  (:a, 'locked',   -3000, 'UAH', now(), '{}'::jsonb, false, 5411, 'Silpo', true, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date)"
@@ -100,7 +100,7 @@ async def test_engine_round_trip_applies_categories_and_nulls(session_factory):
                 "VALUES "
                 "  (:a, 'g-debit',  -1500, 'UAH', now(), '{}'::jsonb, false, 5411, 'ATB', false, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date), "
-                "  (:a, 'no-match', -2000, 'UAH', now(), '{}'::jsonb, false, 4111, 'Bolt', false, "
+                "  (:a, 'no-match', -2000, 'UAH', now(), '{}'::jsonb, false, 9999, 'Bolt', false, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date), "
                 "  (:a, 'locked',   -3000, 'UAH', now(), '{}'::jsonb, false, 5411, 'Silpo', true, "
                 "   (now() AT TIME ZONE 'Europe/Kyiv')::date)"
@@ -109,13 +109,12 @@ async def test_engine_round_trip_applies_categories_and_nulls(session_factory):
         )
 
     touched = ["g-debit", "no-match", "locked"]
-    async with session_factory() as s:
+    async with session_factory() as s, s.begin():
         repo = TransactionRepo(s)
         rules = compile_rules(await RuleRepo(s).list_active_ordered())
         rows = await repo.fetch_for_categorize(acc_id, touched)
         updates = categorize_rows(rows, rules)
-        async with s.begin():
-            await repo.apply_categories(updates)
+        await repo.apply_categories(updates)
 
     async with session_factory() as s:
         result = (
