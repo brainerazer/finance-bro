@@ -28,7 +28,6 @@ def _seed_tracked():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="runner.fx_tick lands in a later 03 plan", strict=False)
 async def test_fx_tick_orders_by_currency_and_isolates_errors(session_factory):
     from finance_bro.importers.base import FxRateRow
     from finance_bro.scheduler.runner import SchedulerRunner
@@ -56,7 +55,6 @@ async def test_fx_tick_orders_by_currency_and_isolates_errors(session_factory):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="runner.fx_tick lands in a later 03 plan", strict=False)
 async def test_fx_tick_bootstrap_incomplete_refetches_range(session_factory):
     from finance_bro.importers.base import FxRateRow
     from finance_bro.scheduler.runner import SchedulerRunner
@@ -81,7 +79,6 @@ async def test_fx_tick_bootstrap_incomplete_refetches_range(session_factory):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="runner.fx_tick lands in a later 03 plan", strict=False)
 async def test_fx_tick_empty_records_last_error_and_no_scheduler_state_write(
     session_factory,
 ):

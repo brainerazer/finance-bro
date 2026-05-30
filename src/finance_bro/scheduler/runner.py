@@ -16,16 +16,19 @@ Anti-patterns explicitly avoided (per RESEARCH.md):
   - No multiplying timestamps by 1000 (Mono accepts UNIX seconds).
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from finance_bro.db.account_repo import AccountRepo
+from finance_bro.db.fx_rate_repo import FxRateRepo
 from finance_bro.db.import_run_repo import ImportRunRepo
 from finance_bro.db.models import Account
 from finance_bro.db.scheduler_state_repo import SchedulerStateRepo
+from finance_bro.db.tracked_fx_currency_repo import TrackedFxCurrencyRepo
 from finance_bro.db.transaction_repo import TransactionRepo
+from finance_bro.importers.base import FxRatesPort
 from finance_bro.importers.monobank import MonobankImporter
 from finance_bro.scheduler.errors import (
     MonoAuthError,
@@ -33,6 +36,7 @@ from finance_bro.scheduler.errors import (
     MonoTransientError,
 )
 from finance_bro.scheduler.window import backfill_chunks
+from finance_bro.services.fx_bootstrap import FxBootstrapService
 
 # D-16: live-poll lookback window. window_from = now - 1h means we re-fetch the
 # last hour every tick — small enough to be cheap, large enough that a missed
@@ -41,6 +45,9 @@ LIVE_POLL_LOOKBACK = timedelta(hours=1)
 # Pattern 7: stale in_flight rows older than 5 min are presumed crashed and
 # reset to pending.
 RECOVER_THRESHOLD_SECONDS = 300
+# D-17: an already-bootstrapped currency only needs today's rate each tick. A
+# tiny trailing window absorbs a missed-tick / weekend gap cheaply.
+FX_TICK_LOOKBACK = timedelta(days=3)
 
 _log = structlog.get_logger()
 
@@ -49,10 +56,16 @@ class SchedulerRunner:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        importer: MonobankImporter,
+        importer: MonobankImporter | None = None,
+        fx_importer: FxRatesPort | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._importer = importer
+        # The FX source (NBU) port. Distinct from the Mono importer — NBU has no
+        # token, no rate-limit gate, and its failures NEVER touch scheduler_state
+        # (D-08). Optional so the Mono-only tick paths can construct the runner
+        # without an FX source.
+        self._fx_importer = fx_importer
         # Cached after the first read_state(); the runner never re-reads inside
         # tick (D-15 + Pattern 5 — sticky bit lives on disk and is read once).
         self._cached_state: tuple[str, str | None] = ("running", None)
@@ -130,9 +143,7 @@ class SchedulerRunner:
                     continue
                 ids = await ir_repo.enqueue_backfill(acc.id, chunks)
                 ids_out.extend(ids)
-        _log.info(
-            "scheduler.backfill.enqueue", account_count=len(accounts), runs=len(ids_out)
-        )
+        _log.info("scheduler.backfill.enqueue", account_count=len(accounts), runs=len(ids_out))
         return ids_out
 
     async def enqueue_live_for_all_active_cards(self) -> list[tuple[int, int]]:
@@ -226,8 +237,7 @@ class SchedulerRunner:
                 return never_polled[0]
             return min(
                 eligible,
-                key=lambda c: last_live[c.id].completed_at
-                or datetime.min.replace(tzinfo=UTC),
+                key=lambda c: last_live[c.id].completed_at or datetime.min.replace(tzinfo=UTC),
             )
 
     # ---- tick (the heart) ----
@@ -307,9 +317,7 @@ class SchedulerRunner:
                 )
             ]
             async with self._session_factory() as session, session.begin():
-                inserted, updated = await TransactionRepo(session).insert_many(
-                    account.id, items
-                )
+                inserted, updated = await TransactionRepo(session).insert_many(account.id, items)
                 # WR-01 + D-17: import_runs.inserted persists "rows touched"
                 # (insert + update). Per-call breakdown of insert-vs-update
                 # is logged via structlog (`updated_in_place` below) rather
@@ -332,9 +340,7 @@ class SchedulerRunner:
             await self._set_state_auth_failed(str(e))
             _log.error("scheduler.tick.auth_failed", import_run_id=run.id)
         except MonoRateLimitError as e:
-            await self._mark_error(
-                run.id, f"429 (Retry-After={e.retry_after_seconds})"
-            )
+            await self._mark_error(run.id, f"429 (Retry-After={e.retry_after_seconds})")
             _log.warning(
                 "scheduler.tick.mono_429",
                 import_run_id=run.id,
@@ -342,12 +348,73 @@ class SchedulerRunner:
             )
         except MonoTransientError as e:
             await self._mark_error(run.id, str(e))
-            _log.warning(
-                "scheduler.tick.transient", import_run_id=run.id, error=str(e)
-            )
+            _log.warning("scheduler.tick.transient", import_run_id=run.id, error=str(e))
         except Exception as e:  # noqa: BLE001
             await self._mark_error(run.id, repr(e))
             _log.exception("scheduler.tick.unexpected", import_run_id=run.id)
+
+    # ---- fx tick (NBU daily fetch + bootstrap re-run) ----
+
+    async def fx_tick(self) -> None:
+        """Daily FX cron tick (D-06/D-08/D-17).
+
+        Iterate the tracked currencies in ``ORDER BY currency`` (deterministic).
+        Per currency, error-isolated (one currency's failure logs and continues
+        — it never aborts the loop):
+          - bootstrap_done = false  -> re-run the 12-month lazy backfill
+            (idempotent ``FxBootstrapService.maybe_bootstrap_fx``).
+          - bootstrap_done = true   -> fetch the small trailing window, upsert,
+            and ``mark_attempted(None)`` on success / ``mark_attempted("no
+            rates published")`` on an empty NBU result (D-16).
+
+        FX failures land in logs + ``tracked_fx_currencies.last_error`` ONLY.
+        This method NEVER writes ``scheduler_state`` (D-08 — NBU has no token to
+        revoke; the Mono poll cursor must stay isolated from FX failures).
+        The HTTP fetch runs OUTSIDE any open session.
+        """
+        if self._fx_importer is None:
+            _log.warning("fx.tick.no_importer")
+            return
+
+        bootstrap = FxBootstrapService(self._session_factory, self._fx_importer)
+        today = datetime.now(UTC).date()
+
+        async with self._session_factory() as session, session.begin():
+            currencies = await TrackedFxCurrencyRepo(session).list_currencies()
+
+        for currency in currencies:
+            try:
+                await self._fx_tick_currency(currency, bootstrap, today)
+            except Exception:  # noqa: BLE001 - per-currency isolation (D-17)
+                _log.exception("fx.tick.currency.failed", currency=currency)
+
+    async def _fx_tick_currency(
+        self, currency: str, bootstrap: FxBootstrapService, today: date
+    ) -> None:
+        async with self._session_factory() as session, session.begin():
+            tracked = await TrackedFxCurrencyRepo(session).get(currency)
+        bootstrap_done = bool(tracked.bootstrap_done) if tracked is not None else False
+
+        if not bootstrap_done:
+            # Bootstrap-incomplete: re-run the (idempotent) 12-month backfill.
+            await bootstrap.maybe_bootstrap_fx(currency)
+            _log.info("fx.tick.currency.bootstrap", currency=currency)
+            return
+
+        # Already bootstrapped: fetch today's rate (small trailing window).
+        # HTTP outside any open session.
+        assert self._fx_importer is not None
+        rows = await self._fx_importer.fetch_range(currency, today - FX_TICK_LOOKBACK, today)
+        if not rows:
+            async with self._session_factory() as session, session.begin():
+                await TrackedFxCurrencyRepo(session).mark_attempted(currency, "no rates published")
+            _log.info("fx.tick.currency.empty", currency=currency)
+            return
+
+        async with self._session_factory() as session, session.begin():
+            inserted = await FxRateRepo(session).upsert_many(rows)
+            await TrackedFxCurrencyRepo(session).mark_attempted(currency, None)
+        _log.info("fx.tick.currency.done", currency=currency, rows=inserted)
 
     # ---- internal helpers ----
 
