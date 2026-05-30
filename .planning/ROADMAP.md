@@ -111,7 +111,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
   3. Bohdan calls "run rules over history" and gets a diff preview ("47 transactions will change category, 3 will be overwritten") before commit; after confirm, only the targeted rows update and `is_user_locked = 1` rows are skipped unconditionally.
   4. After Bohdan manually re-categorizes a transaction (sets `category_source = manual`, `is_user_locked = 1`), every subsequent rule run, including on next import, leaves that row alone.
   5. The category list is fully user-editable: Bohdan can rename, recolor, or add categories via `PATCH /api/categories` and `POST /api/categories`; rules referencing a deleted category surface a clear error rather than silently corrupting state.
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 **UI hint:** no
 **Notes / Risks:**
   - **Pitfall 10 (manual edits clobbered):** `is_user_locked` and `category_source` columns must already exist from Phase 1 schema groundwork; the engine skips locked rows unconditionally on every pass.
@@ -181,7 +181,7 @@ Critical invariants land **in the phase that introduces them**, not retrofitted 
 | 1. First Real Transaction | 0/4 | Planned | - |
 | 2. Reliable Sync | 0/? | Not started | - |
 | 3. UAH Truth | 4/4 | Complete | 2026-05-30 |
-| 4. Categorized Spending | 1/4 | In Progress|  |
+| 4. Categorized Spending | 2/4 | In Progress|  |
 | 5. Honest Totals | 0/? | Not started | - |
 | 6. This Month UI | 0/? | Not started | - |
 | 7. Ship Ready | 0/? | Not started | - |
