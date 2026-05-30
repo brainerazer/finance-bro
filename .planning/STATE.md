@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 03
-current_plan: 1
+current_plan: 3
 status: executing
-last_updated: "2026-05-30T13:53:07.405Z"
+last_updated: "2026-05-30T17:40:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 12
-  completed_plans: 8
-  percent: 29
+  completed_plans: 10
+  percent: 33
 ---
 
 # State: finance-bro
@@ -32,7 +32,7 @@ progress:
 ## Current Position
 
 Phase: 03 (uah-truth) — EXECUTING
-Plan: 1 of 4
+Plan: 3 of 4
 
 - **Current phase:** 03
 - **Current plan:** 1
@@ -40,7 +40,7 @@ Plan: 1 of 4
 - **Progress:** Phase 0/7 complete
 
 ```
-[ ] [ ] [ ] [ ] [ ] [ ] [ ]
+[x] [x] [~] [ ] [ ] [ ] [ ]
  1   2   3   4   5   6   7
 ```
 
@@ -67,6 +67,8 @@ Plan: 1 of 4
 - **UAH rollup:** computed on read via `transactions × fx_rates`; never denormalized into a stored column
 - **No app-level auth:** Tailscale/LAN is the trust boundary
 - **No webhooks in v1:** polling only
+- **NBU FX importer (03-02):** `NbuFxImporter.fetch_range` is a single-call range fetch over `exchange_site`, no token/no gate (NBU is unauthenticated); rates parsed via `json.loads(resp.text, parse_float=Decimal)` — never `resp.json()` (Pitfall 1); empty body → `[]` (D-16); tenacity retry capped 3x / 30s
+- **FX persistence (03-02):** `FxRateRepo.upsert_many` is ON CONFLICT (rate_date,currency) DO NOTHING (idempotent); `TrackedFxCurrencyRepo.mark_attempted` records `last_error` only and never touches `scheduler_state` (D-08 — FX failures isolated from the Mono poll cursor)
 
 ### Open Questions
 
@@ -91,11 +93,11 @@ None.
 
 ### Last Action
 
-Session resumed 2026-05-30. Phase 3 (UAH Truth) research completed — 03-RESEARCH.md written (NBU range endpoint live-verified via curl; all 6 open questions answered). CONTEXT ✓ RESEARCH ✓; no plans yet. Prior plan-phase run was interrupted after research, before the planner spawned.
+Executed Plan 03-02 (FX ingestion slice): added `FxRatesPort`/`FxRateRow` + `NbuFxImporter` (single-call NBU range fetch, Decimal rates, empty→[]), extended `currency_map` (PLN/GBP/CHF), and built `FxRateRepo` (idempotent upsert + count) + `TrackedFxCurrencyRepo` (ordered iterate/first-seen upsert/bootstrap flag/last-error). NbuFxImporter scaffolds flipped xfail→live PASS; added `test_fx_repos.py` for live repo coverage. Full suite: 70 passed, 4 xfailed (Plan 03/04 scaffolds), 1 skipped, 0 failed. Commits 35c5c43, 2e9a4d2.
 
 ### Next Action
 
-Run `/gsd-plan-phase 3` to decompose Phase 3 into executable plans (research already done — it will skip straight to planning).
+Execute Plan 03-03 (UAH rollup read-path: LATERAL carry-forward join, fx_on_card multi-currency convert, banker's-rounding rollup math — flips test_fx_rollup_join / test_fx_on_card). Plan 03-04 then wires the cron/bootstrap lifecycle (flips test_fx_bootstrap_lazy / test_fx_stale_fallback / test_fx_tick).
 
 ### Recovery
 
