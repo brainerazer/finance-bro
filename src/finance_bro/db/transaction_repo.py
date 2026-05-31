@@ -201,6 +201,26 @@ class TransactionRepo:
         """
     )
 
+    # CR-01 (TOCTOU fix): the FOR UPDATE variant used by the history-sweep COMMIT
+    # path. Reading the to-be-written rows under a row lock inside the same
+    # transaction that recomputes the staleness token AND writes back closes the
+    # read→write gap: a concurrent import tick (or a future manual lock-setter)
+    # that touches one of these rows must serialize behind this transaction, and
+    # any state change it made before we locked flips the recomputed token →
+    # StaleRunError (409). Identical projection to the read-only variant above so
+    # RowView construction is shared; FOR UPDATE only legal inside a transaction.
+    _FETCH_ALL_FOR_CATEGORIZE_FOR_UPDATE_SQL = text(
+        """
+        SELECT id, account_id, amount_minor, currency, hold, mcc, description,
+               category_id, is_user_locked, raw_payload
+        FROM transactions
+        WHERE account_id = :account_id
+          AND NOT is_user_locked
+          AND NOT is_deleted
+        FOR UPDATE
+        """
+    )
+
     # Count of locked (non-deleted) rows in the account — the history sweep's
     # `skipped_locked_count` (D-12). Locked rows are excluded from the sweep by
     # _FETCH_ALL_FOR_CATEGORIZE_SQL; this counts how many were left untouched.
@@ -213,14 +233,24 @@ class TransactionRepo:
         """
     )
 
-    async def fetch_all_for_categorize(self, account_id: int) -> list[RowView]:
+    async def fetch_all_for_categorize(
+        self, account_id: int, *, for_update: bool = False
+    ) -> list[RowView]:
         """Load EVERY non-locked, non-deleted row in the account as pure
         `RowView`s for the history sweep (D-14). The account-wide counterpart to
         `fetch_for_categorize`: locked rows are excluded in SQL (D-09 / Pitfall 1).
-        Reuses the identical RowView construction + raw_payload `.get()` safety."""
-        result = await self._s.execute(
-            self._FETCH_ALL_FOR_CATEGORIZE_SQL, {"account_id": account_id}
+        Reuses the identical RowView construction + raw_payload `.get()` safety.
+
+        `for_update=True` (CR-01) acquires a row lock on every returned row and is
+        ONLY valid inside an open transaction — the history-sweep commit path uses
+        it so the recompute→token-check→write sequence is atomic. The read-only
+        preview path leaves it False."""
+        sql = (
+            self._FETCH_ALL_FOR_CATEGORIZE_FOR_UPDATE_SQL
+            if for_update
+            else self._FETCH_ALL_FOR_CATEGORIZE_SQL
         )
+        result = await self._s.execute(sql, {"account_id": account_id})
         rows: list[RowView] = []
         for m in result.mappings().all():
             raw: dict[str, Any] = m["raw_payload"] or {}
@@ -245,13 +275,16 @@ class TransactionRepo:
         result = await self._s.execute(self._COUNT_LOCKED_SQL, {"account_id": account_id})
         return int(result.scalar_one())
 
-    # Targeted, parameterized write-back. NEVER references is_user_locked in the
-    # SET clause — locked rows are excluded upstream by fetch_for_categorize and
-    # by the engine's SKIP. A (id, None) update writes category_id NULL with
+    # Targeted, parameterized write-back. Locked rows are excluded upstream by
+    # fetch_for_categorize / fetch_all_for_categorize and by the engine's SKIP;
+    # the `AND NOT is_user_locked` WHERE guard (WR-02 / CAT-04) is defense-in-depth
+    # so this write can NEVER clobber a manually-locked row even if a stale (id)
+    # reached it. A (id, None) update writes category_id NULL with
     # category_source='rule' (D-02: the row was evaluated, matched nothing — it
     # is stamped 'rule', never silently bucketed into a real category).
     _APPLY_CATEGORY_SQL = text(
-        "UPDATE transactions SET category_id = :cid, category_source = 'rule' WHERE id = :tid"
+        "UPDATE transactions SET category_id = :cid, category_source = 'rule' "
+        "WHERE id = :tid AND NOT is_user_locked"
     )
 
     async def apply_categories(self, updates: list[tuple[int, int | None]]) -> None:

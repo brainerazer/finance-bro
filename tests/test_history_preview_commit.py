@@ -24,6 +24,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from finance_bro.db.engine import get_session_factory
+from finance_bro.db.transaction_repo import TransactionRepo
 from finance_bro.services.rules_history import RulesHistoryService, StaleRunError
 
 
@@ -278,6 +279,34 @@ async def test_locked_row_never_in_changes_and_unchanged_after_commit(session_fa
     await svc.commit(acc_id, preview.token)
     state = await _tx_state(session_factory, acc_id)
     assert state["d-locked"] == (transport, "manual", True)
+
+
+@pytest.mark.asyncio
+async def test_apply_categories_writeback_refuses_locked_row(session_factory):
+    """WR-02 / CAT-04 defense-in-depth: even when a locked row's id is handed
+    DIRECTLY to `apply_categories` (the write-back bypassing every upstream
+    filter — the exact clobber CR-01 warned about), the `AND NOT is_user_locked`
+    WHERE guard refuses the UPDATE. This deterministically proves the write-back
+    can never overwrite a manual lock, closing the gap the verifier flagged as
+    only probabilistically held."""
+    acc_id, groceries, transport = await _seed_mixed_account(session_factory)
+    idmap = await _id_map(session_factory, acc_id)
+    locked_id = idmap["d-locked"]
+    unlocked_id = idmap["a-null-grocery"]
+
+    # Hand BOTH a locked and an unlocked id straight to the write-back.
+    async with session_factory() as s, s.begin():
+        await TransactionRepo(s).apply_categories(
+            [(locked_id, groceries), (unlocked_id, groceries)]
+        )
+
+    state = await _tx_state(session_factory, acc_id)
+    # Locked row is untouched despite being explicitly targeted.
+    assert state["d-locked"] == (transport, "manual", True)
+    # The unlocked row in the same batch DID get written — the guard is surgical,
+    # not a blanket no-op.
+    assert state["a-null-grocery"][0] == groceries
+    assert state["a-null-grocery"][1] == "rule"
 
 
 # ----- Route-level coverage (Task 2) — via the `client` ASGI fixture -----

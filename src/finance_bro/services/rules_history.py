@@ -14,10 +14,11 @@ Locked rows are excluded twice over: `fetch_all_for_categorize` filters
 `NOT is_user_locked` in SQL (D-09 / Pitfall 1) AND the engine returns SKIP, so
 `apply_categories` can never write a locked row (T-4-lock / CAT-04).
 
-The session block does only DB work; the pure engine runs OUTSIDE the session
-(mirrors `import_service` Step 4b composition). `_compute` is the single source
-of truth used by BOTH preview and commit, guaranteeing the commit re-runs the
-SAME computation the token was derived from (D-13).
+`_compute_in_session` is the single source of truth used by BOTH preview and
+commit, guaranteeing commit re-runs the SAME computation the token was derived
+from (D-13). Preview runs it read-only in a throwaway session; commit runs it
+`FOR UPDATE` INSIDE its write transaction (CR-01) so the recompute → token
+compare → write-back is atomic and the read→write TOCTOU window is closed.
 """
 
 import hashlib
@@ -72,22 +73,23 @@ class RulesHistoryService:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def _compute(self, account_id: int) -> _Computation:
-        """Single source of truth for both preview and commit (D-13): load the
-        ordered rules + all non-locked rows in a session, then run the PURE
-        engine OUTSIDE the session and derive the diff + token from CURRENT
-        state. Calling this on commit guarantees the SAME computation the token
-        was issued from is re-run."""
-        async with self._session_factory() as session:
-            # ORM `Rule` rows satisfy RuleRowLike at runtime (Mapped[int] -> int,
-            # Mapped[dict] -> dict on instance access); cast at the boundary —
-            # keeps the categorizer package SQLAlchemy-free.
-            raw_rules = await RuleRepo(session).list_active_ordered()
-            tx_repo = TransactionRepo(session)
-            rows = await tx_repo.fetch_all_for_categorize(account_id)
-            skipped_locked_count = await tx_repo.count_locked(account_id)
+    async def _compute_in_session(
+        self, session: AsyncSession, account_id: int, *, lock: bool
+    ) -> _Computation:
+        """Core sweep against an OPEN session: load the ordered rules + all
+        non-locked rows, run the PURE engine, and derive the diff + token from
+        CURRENT state. `lock=True` (CR-01) reads the rows `FOR UPDATE` so the
+        commit path's recompute→token-check→write is atomic — no concurrent
+        import tick can mutate a row between the read and the write-back."""
+        # ORM `Rule` rows satisfy RuleRowLike at runtime (Mapped[int] -> int,
+        # Mapped[dict] -> dict on instance access); cast at the boundary —
+        # keeps the categorizer package SQLAlchemy-free.
+        raw_rules = await RuleRepo(session).list_active_ordered()
+        tx_repo = TransactionRepo(session)
+        rows = await tx_repo.fetch_all_for_categorize(account_id, for_update=lock)
+        skipped_locked_count = await tx_repo.count_locked(account_id)
 
-        # Pure engine OUTSIDE the session (mirrors import_service Step 4b).
+        # Pure engine, no DB access (mirrors import_service Step 4b composition).
         rules = compile_rules(cast("list[RuleRowLike]", raw_rules))
         updates = categorize_rows(rows, rules)
 
@@ -103,6 +105,14 @@ class RulesHistoryService:
         ]
         token = _compute_token(rules, rows)
         return _Computation(token=token, diff=diff, skipped_locked_count=skipped_locked_count)
+
+    async def _compute(self, account_id: int) -> _Computation:
+        """Read-only single source of truth for PREVIEW (D-13): a fresh session,
+        no row lock. Commit uses `_compute_in_session(..., lock=True)` inside its
+        own write transaction so it can recompute, compare the token, and write
+        atomically."""
+        async with self._session_factory() as session:
+            return await self._compute_in_session(session, account_id, lock=False)
 
     async def preview(self, account_id: int) -> RunPreviewOut:
         """Re-evaluate ALL non-locked rows and return the full diff + token
@@ -121,18 +131,21 @@ class RulesHistoryService:
 
     async def commit(self, account_id: int, token: str) -> dict[str, int]:
         """Recompute the token from CURRENT state and apply the diff ONLY on
-        match (D-13). A mismatch raises `StaleRunError` and writes nothing
-        (T-4-stale / Pitfall 4 — never blind-apply a preview-time diff). The
-        write touches only the diffed non-locked rows; `apply_categories` stamps
-        `category_source='rule'` (NULL allowed for an evaluated-but-unmatched
-        row, D-02). Locked rows are unreachable here — excluded by the SQL read
-        AND the engine SKIP (T-4-lock)."""
-        comp = await self._compute(account_id)
-        if comp.token != token:
-            raise StaleRunError(
-                "Rules or data changed since preview; re-preview before committing."
-            )
-        updates = [(c.transaction_id, c.new_category_id) for c in comp.diff]
+        match (D-13), all in ONE transaction (CR-01). The recompute reads the
+        sweep rows `FOR UPDATE`, so the token comparison and the write-back are
+        atomic against the row set: a concurrent import tick (or a future manual
+        lock-setter) that mutated a row either lands before our lock — flipping
+        the recomputed token → `StaleRunError` (T-4-stale / Pitfall 4) and
+        writing nothing — or blocks behind this transaction. `apply_categories`
+        additionally carries an `AND NOT is_user_locked` guard (WR-02), so a
+        locked row is unreachable three ways over: the FOR UPDATE read filter,
+        the engine SKIP, and the write WHERE clause (T-4-lock / CAT-04)."""
         async with self._session_factory() as session, session.begin():
+            comp = await self._compute_in_session(session, account_id, lock=True)
+            if comp.token != token:
+                raise StaleRunError(
+                    "Rules or data changed since preview; re-preview before committing."
+                )
+            updates = [(c.transaction_id, c.new_category_id) for c in comp.diff]
             await TransactionRepo(session).apply_categories(updates)
         return {"applied": len(comp.diff)}
