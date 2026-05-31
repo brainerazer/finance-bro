@@ -16,7 +16,7 @@ Every prioritization tradeoff resolves toward: less manual work for the user, an
 
 <!-- Shipped and confirmed valuable. -->
 
-(None yet — ship to validate)
+- [x] Hybrid categorization framework — user-editable rules engine shipped in Phase 4: MCC-default taxonomy + composable structured-predicate rules (no eval), auto-categorize on import, run-rules-over-history with diff preview, and manual-lock semantics that the engine never clobbers (CAT-04 held transaction-safely). LLM categorizer remains pluggable but deferred. _(Validated in Phase 4: Categorized Spending)_
 
 ### Active
 
@@ -25,7 +25,6 @@ Every prioritization tradeoff resolves toward: less manual work for the user, an
 - [ ] Pull transactions from Monobank via personal-token polling (api.monobank.ua/personal/)
 - [ ] Persist accounts, jars, and transactions in a local database with full source payload retained
 - [ ] Multi-currency model: UAH, USD, EUR kept distinct; rolled up to UAH at transaction-day FX rate
-- [ ] Hybrid categorization framework — user-editable rules engine in v1; LLM categorizer pluggable but deferred
 - [ ] Detect and collapse duplicate transactions on re-import or backfill overlap
 - [ ] Detect internal transfers between user's own Mono accounts/jars/cards so they don't show as expense+income
 - [ ] Match refunds and reversals to their original transactions so the pair nets to zero in spending views
@@ -105,4 +104,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-10 after initialization*
+*Last updated: 2026-05-31 after Phase 4 (Categorized Spending) completion*
